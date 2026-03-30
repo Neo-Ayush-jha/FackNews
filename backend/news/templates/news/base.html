@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Fake News Detector{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,600&family=Space+Grotesk:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root {
+        --ink: #0b0f14;
+        --sky: #e8f6ff;
+        --glow: #f7c77a;
+        --mint: #2bd4a2;
+        --rose: #ef6a7b;
+      }
+      body {
+        font-family: "Space Grotesk", system-ui, sans-serif;
+        background: radial-gradient(1200px 600px at 80% -10%, #ffe8cc 0%, transparent 60%),
+          radial-gradient(900px 500px at -10% 10%, #d1f7ff 0%, transparent 55%),
+          linear-gradient(180deg, #f7fbff 0%, #fef4ea 100%);
+        color: var(--ink);
+      }
+      .serif {
+        font-family: "Newsreader", Georgia, serif;
+      }
+      .glass {
+        background: rgba(255, 255, 255, 0.75);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+        backdrop-filter: blur(16px);
+      }
+      .grid-dots {
+        background-image: radial-gradient(rgba(15, 23, 42, 0.08) 1px, transparent 1px);
+        background-size: 18px 18px;
+      }
+      {% block extra_style %}{% endblock %}
+    </style>
+  </head>
+  <body class="min-h-screen">
+    {% include "news/partials/navbar.html" %}
+
+    {% block content %}{% endblock %}
+
+    {% include "news/partials/footer.html" %}
+
+    <script>
+      const authState = {
+        user: null,
+      };
+
+      const setAuthUI = (user) => {
+        const loginLink = document.getElementById("navLoginLink");
+        const profileWrap = document.getElementById("navProfileWrap");
+        const profileName = document.getElementById("navProfileName");
+        if (!loginLink || !profileWrap || !profileName) {
+          return;
+        }
+        if (user) {
+          loginLink.classList.add("hidden");
+          profileWrap.classList.remove("hidden");
+          profileName.textContent = user.name || user.email || "Profile";
+        } else {
+          profileWrap.classList.add("hidden");
+          loginLink.classList.remove("hidden");
+        }
+      };
+
+      const getCookie = (name) => {
+        const match = document.cookie.split("; ").find((row) => row.startsWith(`${name}=`));
+        return match ? match.split("=")[1] : "";
+      };
+
+      const loadAuthState = async () => {
+        try {
+          const response = await fetch("/api/auth/me/");
+          const data = await response.json();
+          if (data && data.authenticated) {
+            authState.user = data.user;
+            setAuthUI(data.user);
+          } else {
+            setAuthUI(null);
+          }
+        } catch (err) {
+          setAuthUI(null);
+        }
+      };
+
+      const bindLogout = () => {
+        const logoutBtn = document.getElementById("navLogoutBtn");
+        if (!logoutBtn) {
+          return;
+        }
+        logoutBtn.addEventListener("click", async () => {
+          try {
+            await fetch("/api/auth/logout/", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCookie("csrftoken"),
+              },
+            });
+          } catch (err) {
+            // no-op
+          }
+          window.location.href = "/";
+        });
+      };
+
+      window.addEventListener("load", () => {
+        loadAuthState();
+        bindLogout();
+      });
+    </script>
+
+    {% block page_script %}{% endblock %}
+  </body>
+</html>

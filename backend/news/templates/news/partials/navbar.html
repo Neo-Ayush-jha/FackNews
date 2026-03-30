@@ -1,0 +1,31 @@
+<header class="px-6 pt-6">
+  <nav class="mx-auto flex max-w-6xl items-center justify-between">
+    <a class="flex items-center gap-3" href="/">
+      <div class="h-10 w-10 rounded-2xl bg-black text-white grid place-items-center font-bold">FN</div>
+      <div>
+        <p class="text-sm uppercase tracking-widest text-slate-500">Signal Desk</p>
+        <h1 class="text-lg font-semibold">Fake News Detector</h1>
+      </div>
+    </a>
+    <div class="hidden items-center gap-6 text-sm font-medium md:flex">
+      <a class="hover:text-slate-900 text-slate-600" href="/">Home</a>
+      <a class="hover:text-slate-900 text-slate-600" href="/about/">About</a>
+      <a class="hover:text-slate-900 text-slate-600" href="/upload/">Upload</a>
+      <a class="hover:text-slate-900 text-slate-600" href="/results/">Results</a>
+      <a id="navLoginLink" class="hover:text-slate-900 text-slate-600" href="/auth/">Login</a>
+      <div id="navProfileWrap" class="hidden items-center gap-3">
+        <a class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600" href="/auth/">
+          <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+          <span id="navProfileName">Profile</span>
+        </a>
+        <button id="navLogoutBtn" class="text-xs font-semibold text-slate-500 hover:text-slate-800">Logout</button>
+      </div>
+    </div>
+    <a
+      href="/results/"
+      class="hidden md:inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-sm font-semibold text-white"
+    >
+      Latest Result
+    </a>
+  </nav>
+</header>

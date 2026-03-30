@@ -1,0 +1,96 @@
+# Virtual Environment
+env/
+venv/
+ENV/
+.venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Database
+db.sqlite3
+*.sqlite3
+*.db
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Django
+*.log
+local_settings.py
+/media/
+/staticfiles/
+.coverage
+htmlcov/
+
+# Model files and data
+*.pkl
+*.joblib
+*.h5
+*.pth
+*.pt
+backend/bert_model/model.safetensors
+backend/dataset/*.csv
+
+# Results and logs
+results/
+logs/
+
+# Testing
+.pytest_cache/
+.tox/
+coverage.xml
+
+# IDE Specific
+.python-version
+Pipfile.lock
+poetry.lock
+
+# Local environment artifacts
+pyvenv.cfg
+share/
+backend/bert_model/
+backend/dataset/

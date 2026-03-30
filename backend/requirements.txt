@@ -1,0 +1,31 @@
+# Install with:
+#   pip install -r backend/requirements.txt
+#
+# These versions are aligned with the working local environment so the
+# Django app, model inference, training script, and URL/article parsing
+# all run consistently on another laptop.
+
+Django==6.0.3
+djangorestframework==3.17.0
+django-cors-headers==4.9.0
+python-dotenv==1.2.2
+
+numpy==2.4.3
+pandas==3.0.1
+scikit-learn==1.8.0
+joblib==1.5.3
+
+torch==2.10.0
+transformers==5.3.0
+datasets==4.8.3
+accelerate==1.13.0
+tqdm==4.67.3
+sentencepiece==0.2.1
+safetensors==0.7.0
+
+Pillow==12.1.1
+requests==2.32.5
+beautifulsoup4==4.14.3
+lxml==6.0.2
+lxml_html_clean==0.4.4
+newspaper3k==0.2.8
