@@ -421,11 +421,21 @@ def analyze_text(text):
     real_prob = probs[real_idx].item()
     signal_score = _fake_signal_score(cleaned_text)
 
-    if signal_score >= 2 and fake_prob > 0.4:
+    # Decision policy: keep model-first behavior, but add stronger protection
+    # against obvious fake-style language when confidence margin is small.
+    confidence_gap = abs(real_prob - fake_prob)
+
+    if signal_score >= 6 and fake_prob >= 0.30:
+        prediction = fake_idx
+    elif signal_score >= 4 and fake_prob >= 0.35:
+        prediction = fake_idx
+    elif signal_score >= 2 and fake_prob >= 0.40:
+        prediction = fake_idx
+    elif signal_score >= 5 and confidence_gap <= 0.22:
         prediction = fake_idx
     elif real_prob > 0.75:
         prediction = real_idx
-    elif fake_prob > 0.6:
+    elif fake_prob > 0.60:
         prediction = fake_idx
     else:
         prediction = int(torch.argmax(probs).item())

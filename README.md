@@ -18,7 +18,7 @@ If `env/` does not exist, create and activate it:
 ```powershell
 cd ..
 python -m venv env
-.\env\Scripts\Activate.ps1
+.\env\Scripts\Activate.ps
 cd backend
 ```
 
