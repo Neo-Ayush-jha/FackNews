@@ -358,6 +358,40 @@ def _merge_predictions(primary_result, verification_result):
     }
 
 
+def _build_decision_reason(primary_result, verification_result, merged_result):
+    final_label = merged_result["prediction"]
+    final_conf = merged_result["confidence"]
+    fake_conf = primary_result["fake_confidence"]
+    real_conf = primary_result["real_confidence"]
+    signal_score = primary_result.get("signal_score", 0)
+
+    parts = [
+        (
+            f"Final decision is {final_label} with {final_conf}% confidence, "
+            f"based on primary model scores (Fake: {fake_conf}%, Real: {real_conf}%)."
+        )
+    ]
+
+    if signal_score >= 5:
+        parts.append(
+            "The content contains strong fake-news style signals (sensational/viral/exaggerated patterns)."
+        )
+    elif signal_score >= 2:
+        parts.append("The content contains moderate suspicious language patterns.")
+    else:
+        parts.append("The content does not show strong fake-news style language patterns.")
+
+    if verification_result.get("status") == "verified":
+        parts.append(
+            f"External verification by {verification_result.get('provider')} also returned "
+            f"{verification_result.get('label')} with {verification_result.get('confidence')}% confidence."
+        )
+    else:
+        parts.append("External verification was unavailable, so the primary model decision was used.")
+
+    return " ".join(parts)
+
+
 # def predict_text(text):
 #     _load_model()
 #     cleaned_text = (text or "").strip()
@@ -452,10 +486,12 @@ def analyze_text(text):
     }
     verification_result = _verify_with_llm(cleaned_text, primary_label, primary_confidence)
     merged_result = _merge_predictions(primary_result, verification_result)
+    decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
 
     return {
         "prediction": merged_result["prediction"],
         "confidence": merged_result["confidence"],
+        "decision_reason": decision_reason,
         "primary_prediction": primary_label,
         "primary_confidence": primary_confidence,
         "primary_fake_confidence": primary_result["fake_confidence"],

@@ -120,6 +120,10 @@ def predict_news(request):
         result=analysis["prediction"],
         confidence=analysis["confidence"],
         verification_result={
+            "decision_reason": analysis["decision_reason"],
+            "signal_score": analysis["signal_score"],
+            "primary_prediction": analysis["primary_prediction"],
+            "primary_confidence": analysis["primary_confidence"],
             "provider": analysis["verification_provider"],
             "model": analysis["verification_model"],
             "status": analysis["verification_status"],
@@ -133,6 +137,8 @@ def predict_news(request):
     return Response({
         "prediction": analysis["prediction"],
         "confidence": analysis["confidence"],
+        "decision_reason": analysis["decision_reason"],
+        "signal_score": analysis["signal_score"],
         "primary_prediction": analysis["primary_prediction"],
         "primary_confidence": analysis["primary_confidence"],
         "verification_status": analysis["verification_status"],
