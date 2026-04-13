@@ -104,7 +104,9 @@ def predict_news(request):
         try:
             text = extract_text_from_url(url)
         except Exception as exc:
-            return Response({"error": f"Could not extract article text: {str(exc)}"}, status=400)
+            # Allow manual pasted text to continue if URL extraction is blocked.
+            if not text:
+                return Response({"error": f"Could not extract article text: {str(exc)}"}, status=400)
 
     if not text:
         return Response({"error": "No text provided"}, status=400)

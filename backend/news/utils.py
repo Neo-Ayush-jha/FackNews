@@ -10,6 +10,11 @@ import torch
 from bs4 import BeautifulSoup
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:  # pragma: no cover - optional fallback client
+    curl_requests = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -507,45 +512,229 @@ def analyze_text(text):
     }
 
 
+# def extract_text_from_url(url):
+#     try:
+#         from newspaper import Article
+#         from newspaper import Config
+#     except ImportError as exc:
+#         raise ImportError(
+#             "Missing dependency for URL extraction. Install newspaper3k and lxml_html_clean."
+#         ) from exc
+
+#     config = Config()
+#     config.browser_user_agent = ARTICLE_REQUEST_HEADERS["User-Agent"]
+#     config.request_timeout = 15
+
+#     try:
+#         article = Article(url, config=config)
+#         article.download()
+#         article.parse()
+#         text = (article.text or "").strip()
+#         if text:
+#             return text
+#     except Exception as exc:
+#         logger.warning("newspaper3k extraction failed for %s: %s", url, exc)
+
+#     try:
+#         if curl_requests is not None:
+#             response = curl_requests.get(
+#                 url,
+#                 headers=ARTICLE_REQUEST_HEADERS,
+#                 timeout=20,
+#                 impersonate="chrome123",
+#             )
+#         else:
+#             response = requests.get(url, headers=ARTICLE_REQUEST_HEADERS, timeout=20)
+#         response.raise_for_status()
+#     except requests.RequestException as exc:
+#         raise ValueError(
+#             "The news site blocked automated access or the page could not be fetched."
+#         ) from exc
+#     except Exception as exc:
+#         raise ValueError(
+#             "The news site blocked automated access or the page could not be fetched."
+#         ) from exc
+
+#     soup = BeautifulSoup(response.text, "html.parser")
+
+#     for tag in soup(["script", "style", "noscript", "iframe", "header", "footer", "nav", "aside"]):
+#         tag.decompose()
+
+#     candidates = []
+#     for selector in (
+#         "article",
+#         "main",
+#         "[role='main']",
+#         ".article-body",
+#         ".story-body",
+#         ".entry-content",
+#         ".post-content",
+#         ".article-content",
+#     ):
+#         candidates.extend(soup.select(selector))
+
+#     paragraph_texts = []
+#     seen_blocks = set()
+
+#     for block in candidates:
+#         text = " ".join(
+#             p.get_text(" ", strip=True)
+#             for p in block.find_all(["p", "h2", "h3", "li"])
+#         ).strip()
+#         normalized = re.sub(r"\s+", " ", text)
+#         if len(normalized) >= 200 and normalized not in seen_blocks:
+#             paragraph_texts.append(normalized)
+#             seen_blocks.add(normalized)
+
+#     if not paragraph_texts:
+#         paragraphs = [
+#             re.sub(r"\s+", " ", p.get_text(" ", strip=True))
+#             for p in soup.find_all("p")
+#         ]
+#         paragraphs = [text for text in paragraphs if len(text) >= 40]
+#         combined = " ".join(paragraphs).strip()
+#         if combined:
+#             paragraph_texts.append(combined)
+
+#     extracted_text = "\n\n".join(paragraph_texts).strip()
+#     if extracted_text:
+#         return extracted_text
+
+#     raise ValueError("The page loaded, but no readable article text was found.")
+
+
+
+
 def extract_text_from_url(url):
-    try:
-        from newspaper import Article
-        from newspaper import Config
-    except ImportError as exc:
-        raise ImportError(
-            "Missing dependency for URL extraction. Install newspaper3k and lxml_html_clean."
-        ) from exc
+    """
+    Robust extractor:
+    1. newspaper3k parse
+    2. curl_cffi browser impersonation on URL variants
+    3. requests fallback on URL variants
+    4. trafilatura/JSON-LD/DOM parsing fallbacks
+    """
 
-    config = Config()
-    config.browser_user_agent = ARTICLE_REQUEST_HEADERS["User-Agent"]
-    config.request_timeout = 15
+    def _url_variants(input_url):
+        base = (input_url or "").strip()
+        variants = [base]
+        if "?" in base:
+            variants.append(f"{base}&output=amp")
+            variants.append(f"{base}&amp=1")
+        else:
+            variants.append(f"{base}?output=amp")
+            variants.append(f"{base}?amp=1")
+        if not base.endswith("/amp"):
+            variants.append(f"{base.rstrip('/')}/amp")
+        return [u for i, u in enumerate(variants) if u and u not in variants[:i]]
 
+    # -------- STEP 1: newspaper3k --------
     try:
+        from newspaper import Article, Config
+        config = Config()
+        config.browser_user_agent = ARTICLE_REQUEST_HEADERS["User-Agent"]
+        config.request_timeout = 10
+
         article = Article(url, config=config)
         article.download()
         article.parse()
-        text = (article.text or "").strip()
-        if text:
-            return text
-    except Exception as exc:
-        logger.warning("newspaper3k extraction failed for %s: %s", url, exc)
 
+        if article.text.strip():
+            return article.text.strip()
+    except Exception:
+        pass
+
+    html = None
+
+    # -------- STEP 2: CURL (BEST BYPASS) --------
     try:
-        response = requests.get(url, headers=ARTICLE_REQUEST_HEADERS, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException as exc:
+        if curl_requests is not None:
+            for candidate_url in _url_variants(url):
+                for browser_profile in ("chrome124", "chrome123", "safari15_5"):
+                    response = curl_requests.get(
+                        candidate_url,
+                        headers=ARTICLE_REQUEST_HEADERS,
+                        impersonate=browser_profile,
+                        timeout=20,
+                        allow_redirects=True,
+                    )
+                    if response.status_code == 200 and response.text:
+                        html = response.text
+                        break
+                if html:
+                    break
+    except Exception:
+        pass
+
+    # -------- STEP 3: requests fallback --------
+    if not html:
+        for candidate_url in _url_variants(url):
+            try:
+                res = requests.get(
+                    candidate_url,
+                    headers=ARTICLE_REQUEST_HEADERS,
+                    timeout=20,
+                    allow_redirects=True,
+                )
+                res.raise_for_status()
+                if res.text:
+                    html = res.text
+                    break
+            except Exception:
+                continue
+
+    if not html:
         raise ValueError(
             "The news site blocked automated access or the page could not be fetched."
-        ) from exc
+        )
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    # -------- STEP 4: trafilatura fallback --------
+    try:
+        from importlib import import_module
+
+        trafilatura = import_module("trafilatura")
+        extracted = trafilatura.extract(
+            html,
+            include_tables=False,
+            include_comments=False,
+            favor_recall=True,
+        )
+        if extracted and len(extracted.strip()) >= 200:
+            return extracted.strip()
+    except Exception:
+        pass
+
+    # -------- STEP 5: BeautifulSoup parsing --------
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Try JSON-LD article bodies before aggressive cleanup.
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = (script.string or script.get_text() or "").strip()
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+
+        stack = payload if isinstance(payload, list) else [payload]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                article_body = node.get("articleBody")
+                if isinstance(article_body, str) and len(article_body.strip()) >= 200:
+                    return re.sub(r"\s+", " ", article_body).strip()
+                graph = node.get("@graph")
+                if isinstance(graph, list):
+                    stack.extend(graph)
 
     for tag in soup(["script", "style", "noscript", "iframe", "header", "footer", "nav", "aside"]):
         tag.decompose()
 
-    candidates = []
-    for selector in (
+    # Universal selectors + site-specific
+    selectors = [
         "article",
+        "[itemprop='articleBody']",
+        "div[itemprop='articleBody']",
         "main",
         "[role='main']",
         ".article-body",
@@ -553,37 +742,55 @@ def extract_text_from_url(url):
         ".entry-content",
         ".post-content",
         ".article-content",
-    ):
-        candidates.extend(soup.select(selector))
+        ".main-story-content",  # WIONews
+        ".article-main",
+        ".content",
+    ]
 
-    paragraph_texts = []
-    seen_blocks = set()
+    candidates = []
+    for sel in selectors:
+        candidates.extend(soup.select(sel))
 
+    texts = []
     for block in candidates:
         text = " ".join(
             p.get_text(" ", strip=True)
             for p in block.find_all(["p", "h2", "h3", "li"])
-        ).strip()
-        normalized = re.sub(r"\s+", " ", text)
-        if len(normalized) >= 200 and normalized not in seen_blocks:
-            paragraph_texts.append(normalized)
-            seen_blocks.add(normalized)
+        )
+        if len(text) > 200:
+            texts.append(text)
 
-    if not paragraph_texts:
+    # -------- STEP 6: fallback paragraph --------
+    if not texts:
         paragraphs = [
-            re.sub(r"\s+", " ", p.get_text(" ", strip=True))
+            p.get_text(" ", strip=True)
             for p in soup.find_all("p")
         ]
-        paragraphs = [text for text in paragraphs if len(text) >= 40]
-        combined = " ".join(paragraphs).strip()
-        if combined:
-            paragraph_texts.append(combined)
+        paragraphs = [p for p in paragraphs if len(p) >= 40]
+        text = " ".join(paragraphs)
+        if len(text) > 200:
+            texts.append(text)
 
-    extracted_text = "\n\n".join(paragraph_texts).strip()
-    if extracted_text:
-        return extracted_text
+    # -------- STEP 7: META fallback --------
+    if not texts:
+        title = soup.title.string if soup.title else ""
+        meta = (
+            soup.find("meta", attrs={"name": "description"})
+            or soup.find("meta", attrs={"property": "og:description"})
+            or soup.find("meta", attrs={"name": "twitter:description"})
+        )
+        desc = meta.get("content", "") if meta else ""
+        fallback = f"{title}. {desc}".strip()
 
-    raise ValueError("The page loaded, but no readable article text was found.")
+        if fallback:
+            return fallback
+
+    final_text = "\n\n".join(texts).strip()
+
+    if final_text:
+        return final_text
+
+    raise ValueError("Content not extractable from this site.")
 
 
 def load_model_background():
