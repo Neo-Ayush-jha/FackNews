@@ -73,7 +73,7 @@ htmlcov/
 *.pth
 *.pt
 backend/bert_model/model.safetensors
-backend/dataset/*.csv
+# backend/dataset/*.csv
 
 # Results and logs
 results/
@@ -93,4 +93,4 @@ poetry.lock
 pyvenv.cfg
 share/
 backend/bert_model/
-backend/dataset/
+# backend/dataset/
