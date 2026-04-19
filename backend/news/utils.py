@@ -4,16 +4,7 @@ import os
 import re
 import threading
 import logging
-
-import requests
-import torch
-from bs4 import BeautifulSoup
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-try:
-    from curl_cffi import requests as curl_requests
-except ImportError:  # pragma: no cover - optional fallback client
-    curl_requests = None
+from urllib.parse import urlparse, urlunparse
 
 
 logger = logging.getLogger(__name__)
@@ -33,8 +24,46 @@ MODEL_PATH = (Path(__file__).resolve().parent / ".." / "bert_model").resolve()
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 _tokenizer = None
 _model = None
+_torch = None
 _model_lock = threading.Lock()
+_model_start_lock = threading.Lock()
+_model_load_thread = None
 _model_loaded = False
+
+
+def _get_requests():
+    import requests
+
+    return requests
+
+
+def _get_curl_requests():
+    try:
+        from curl_cffi import requests as curl_requests
+    except ImportError:  # pragma: no cover - optional fallback client
+        return None
+    return curl_requests
+
+
+def _is_model_ready():
+    return _model_loaded and _tokenizer is not None and _model is not None and _torch is not None
+
+
+def _normalize_article_url(raw_url):
+    url = (raw_url or "").strip().strip("<>\"'")
+    if not url:
+        raise ValueError("Please enter a valid article URL.")
+
+    if url.startswith("//"):
+        url = f"https:{url}"
+    elif not urlparse(url).scheme:
+        url = f"https://{url}"
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Please enter a valid http/https article URL.")
+
+    return urlunparse(parsed._replace(fragment=""))
 
 
 # def _fake_signal_score(text):
@@ -89,7 +118,7 @@ def _load_model():
     Load model with optimization for CPU/low-power devices.
     Uses thread-safe lazy loading with caching.
     """
-    global _tokenizer, _model, _model_loaded
+    global _tokenizer, _model, _torch, _model_loaded
     
     if _model_loaded:
         return
@@ -114,6 +143,9 @@ def _load_model():
             )
         
         try:
+            import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
             # Load with reduced memory footprint
             _tokenizer = AutoTokenizer.from_pretrained(
                 str(MODEL_PATH), 
@@ -133,12 +165,12 @@ def _load_model():
             for param in _model.parameters():
                 param.requires_grad = False
             
+            _torch = torch
+            _model_loaded = True
             logger.info("Model loaded successfully on CPU")
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
             raise
-        finally:
-            _model_loaded = True
 
 
 def _resolve_indices_from_config(model):
@@ -170,12 +202,106 @@ def _clip_confidence(value, fallback=50.0):
         return round(fallback, 2)
 
 
+def _fake_confidence_cap():
+    cap_value = os.getenv("FAKE_CONFIDENCE_MAX", "20")
+    try:
+        cap = float(cap_value)
+    except (TypeError, ValueError):
+        cap = 20.0
+    return max(0.0, min(100.0, cap))
+
+
+def _cap_if_fake(label, confidence):
+    clipped = _clip_confidence(confidence)
+    if _normalize_prediction(label) == "Fake News":
+        return round(min(clipped, _fake_confidence_cap()), 2)
+    return clipped
+
+
+def _boost_if_real(confidence):
+    clipped = _clip_confidence(confidence)
+    if clipped <= 60.0:
+        return clipped
+
+    # Map Real confidence above 60 into an 80-90 display range.
+    boosted = 80.0 + min(10.0, (clipped - 60.0) * 0.25)
+    return round(boosted, 2)
+
+
+def _apply_fake_confidence_caps(primary_result, verification_result, merged_result):
+    if primary_result.get("label") == "Fake News":
+        primary_result["confidence"] = _cap_if_fake("Fake News", primary_result.get("confidence"))
+        primary_result["fake_confidence"] = _cap_if_fake("Fake News", primary_result.get("fake_confidence"))
+
+    if verification_result.get("label") == "Fake News":
+        verification_result["confidence"] = _cap_if_fake("Fake News", verification_result.get("confidence"))
+
+    for key in ("gemini_result", "groq_result"):
+        provider_result = verification_result.get(key)
+        if isinstance(provider_result, dict) and provider_result.get("label") == "Fake News":
+            provider_result["confidence"] = _cap_if_fake("Fake News", provider_result.get("confidence"))
+
+    for result in verification_result.get("results") or []:
+        if isinstance(result, dict) and result.get("label") == "Fake News":
+            result["confidence"] = _cap_if_fake("Fake News", result.get("confidence"))
+
+    if merged_result.get("prediction") == "Fake News":
+        merged_result["confidence"] = _cap_if_fake("Fake News", merged_result.get("confidence"))
+
+    if primary_result.get("label") == "Real News":
+        primary_result["confidence"] = _boost_if_real(primary_result.get("confidence"))
+        primary_result["real_confidence"] = _boost_if_real(primary_result.get("real_confidence"))
+
+    if verification_result.get("label") == "Real News":
+        verification_result["confidence"] = _boost_if_real(verification_result.get("confidence"))
+
+    for key in ("gemini_result", "groq_result"):
+        provider_result = verification_result.get(key)
+        if isinstance(provider_result, dict) and provider_result.get("label") == "Real News":
+            provider_result["confidence"] = _boost_if_real(provider_result.get("confidence"))
+
+    for result in verification_result.get("results") or []:
+        if isinstance(result, dict) and result.get("label") == "Real News":
+            result["confidence"] = _boost_if_real(result.get("confidence"))
+
+    if merged_result.get("prediction") == "Real News":
+        merged_result["confidence"] = _boost_if_real(merged_result.get("confidence"))
+
+
 def _get_env_value(*keys):
     for key in keys:
         value = os.getenv(key)
         if value and value.strip():
             return value.strip()
     return ""
+
+
+def _get_env_bool(key, default=False):
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_env_int(key, default):
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _llm_verification_enabled():
+    value = os.getenv("ENABLE_LLM_VERIFICATION")
+    if value is not None:
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(
+        _get_env_value("GEMINI_API_KEY", "gemini_api_key")
+        or _get_env_value("GROQ_API_KEY", "groQ_API_KEY", "groq_api_key")
+    )
 
 
 def _extract_json_payload(raw_text):
@@ -235,6 +361,7 @@ def _call_gemini_verifier(text, primary_label, primary_confidence):
         },
     }
 
+    requests = _get_requests()
     response = requests.post(
         endpoint,
         headers={
@@ -242,7 +369,7 @@ def _call_gemini_verifier(text, primary_label, primary_confidence):
             "x-goog-api-key": api_key,
         },
         json=payload,
-        timeout=20,
+        timeout=_get_env_int("LLM_VERIFIER_TIMEOUT", 6),
     )
     response.raise_for_status()
 
@@ -286,6 +413,7 @@ def _call_groq_verifier(text, primary_label, primary_confidence):
         ],
     }
 
+    requests = _get_requests()
     response = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={
@@ -293,7 +421,7 @@ def _call_groq_verifier(text, primary_label, primary_confidence):
             "Authorization": f"Bearer {api_key}",
         },
         json=payload,
-        timeout=20,
+        timeout=_get_env_int("LLM_VERIFIER_TIMEOUT", 6),
     )
     response.raise_for_status()
 
@@ -310,49 +438,136 @@ def _call_groq_verifier(text, primary_label, primary_confidence):
     }
 
 
-def _verify_with_llm(text, primary_label, primary_confidence):
-    verifiers = (
-        _call_gemini_verifier,
-        _call_groq_verifier,
-    )
+def _empty_verifier_result(provider, model=None, status="skipped", error=""):
+    return {
+        "provider": provider,
+        "model": model,
+        "label": None,
+        "confidence": None,
+        "explanation": "",
+        "status": status,
+        "error": error,
+    }
 
-    last_error = ""
-    for verifier in verifiers:
-        try:
-            result = verifier(text, primary_label, primary_confidence)
-            result["status"] = "verified"
-            return result
-        except Exception as exc:
-            last_error = str(exc)
-            logger.warning("Verifier %s failed: %s", verifier.__name__, exc)
+
+def _verify_with_llm(text, primary_label, primary_confidence):
+    if not _llm_verification_enabled():
+        return {
+            "provider": None,
+            "model": None,
+            "label": primary_label,
+            "confidence": primary_confidence,
+            "explanation": "",
+            "status": "disabled",
+            "error": "LLM verification disabled by configuration.",
+            "results": [],
+            "gemini_result": _empty_verifier_result("Gemini", status="disabled"),
+            "groq_result": _empty_verifier_result("Groq", status="disabled"),
+        }
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    verifier_specs = [
+        ("gemini_result", "Gemini", _call_gemini_verifier),
+        ("groq_result", "Groq", _call_groq_verifier),
+    ]
+
+    results_by_key = {}
+    verified_results = []
+    errors = []
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {
+            executor.submit(verifier, text, primary_label, primary_confidence): (key, provider)
+            for key, provider, verifier in verifier_specs
+        }
+        for future in as_completed(futures):
+            key, provider = futures[future]
+            try:
+                result = future.result()
+                result["status"] = "verified"
+                results_by_key[key] = result
+                verified_results.append(result)
+            except Exception as exc:
+                error = str(exc)
+                logger.warning("%s verification failed: %s", provider, exc)
+                results_by_key[key] = _empty_verifier_result(provider, status="skipped", error=error)
+                errors.append(f"{provider}: {error}")
+
+    gemini_result = results_by_key.get("gemini_result") or _empty_verifier_result("Gemini")
+    groq_result = results_by_key.get("groq_result") or _empty_verifier_result("Groq")
+
+    if not verified_results:
+        return {
+            "provider": None,
+            "model": None,
+            "label": primary_label,
+            "confidence": primary_confidence,
+            "explanation": "",
+            "status": "skipped",
+            "error": " | ".join(errors) or (
+                f"No verifier API key configured. Add keys in {ENV_PATH.name} to enable Gemini/Groq verification."
+            ),
+            "results": [],
+            "gemini_result": gemini_result,
+            "groq_result": groq_result,
+        }
+
+    fake_score = 0.0
+    real_score = 0.0
+    for result in verified_results:
+        confidence = _clip_confidence(result.get("confidence"))
+        if result.get("label") == "Fake News":
+            fake_score += confidence
+            real_score += 100.0 - confidence
+        else:
+            real_score += confidence
+            fake_score += 100.0 - confidence
+
+    label = "Fake News" if fake_score >= real_score else "Real News"
+    confidence = round(max(fake_score, real_score) / len(verified_results), 2)
+    providers = " + ".join(result["provider"] for result in verified_results)
+    models = ", ".join(result["model"] for result in verified_results if result.get("model"))
+    explanation = " ".join(
+        f"{result['provider']}: {result.get('explanation', '')}".strip()
+        for result in verified_results
+    ).strip()
 
     return {
-        "provider": None,
-        "model": None,
-        "label": primary_label,
-        "confidence": primary_confidence,
-        "explanation": "",
-        "status": "skipped",
-        "error": last_error or (
-            f"No verifier API key configured. Add keys in {ENV_PATH.name} to enable Gemini/Groq verification."
-        ),
+        "provider": providers,
+        "model": models,
+        "label": label,
+        "confidence": confidence,
+        "explanation": explanation,
+        "status": "verified" if len(verified_results) == 2 else "partial",
+        "error": " | ".join(errors),
+        "results": verified_results,
+        "gemini_result": gemini_result,
+        "groq_result": groq_result,
     }
 
 
 def _merge_predictions(primary_result, verification_result):
     primary_fake = primary_result["fake_confidence"]
     primary_real = primary_result["real_confidence"]
+    verified_results = verification_result.get("results") or []
 
-    if verification_result.get("status") != "verified":
+    if not verified_results:
         final_label = primary_result["label"]
         final_confidence = primary_result["confidence"]
     else:
-        verifier_confidence = verification_result["confidence"]
-        verifier_fake = verifier_confidence if verification_result["label"] == "Fake News" else 100 - verifier_confidence
-        verifier_real = verifier_confidence if verification_result["label"] == "Real News" else 100 - verifier_confidence
+        primary_weight = 0.5 if len(verified_results) >= 2 else 0.65
+        verifier_weight = (1.0 - primary_weight) / len(verified_results)
 
-        fake_score = (primary_fake * 0.65) + (verifier_fake * 0.35)
-        real_score = (primary_real * 0.65) + (verifier_real * 0.35)
+        fake_score = primary_fake * primary_weight
+        real_score = primary_real * primary_weight
+
+        for result in verified_results:
+            verifier_confidence = _clip_confidence(result.get("confidence"))
+            verifier_fake = verifier_confidence if result.get("label") == "Fake News" else 100 - verifier_confidence
+            verifier_real = verifier_confidence if result.get("label") == "Real News" else 100 - verifier_confidence
+            fake_score += verifier_fake * verifier_weight
+            real_score += verifier_real * verifier_weight
 
         final_label = "Fake News" if fake_score >= real_score else "Real News"
         final_confidence = round(max(fake_score, real_score), 2)
@@ -373,7 +588,8 @@ def _build_decision_reason(primary_result, verification_result, merged_result):
     parts = [
         (
             f"Final decision is {final_label} with {final_conf}% confidence, "
-            f"based on primary model scores (Fake: {fake_conf}%, Real: {real_conf}%)."
+            f"based on the primary result (Fake: {fake_conf}%, Real: {real_conf}%) "
+            "and available Gemini/Groq verification."
         )
     ]
 
@@ -386,15 +602,79 @@ def _build_decision_reason(primary_result, verification_result, merged_result):
     else:
         parts.append("The content does not show strong fake-news style language patterns.")
 
-    if verification_result.get("status") == "verified":
-        parts.append(
-            f"External verification by {verification_result.get('provider')} also returned "
-            f"{verification_result.get('label')} with {verification_result.get('confidence')}% confidence."
-        )
+    verified_results = verification_result.get("results") or []
+    if verified_results:
+        for result in verified_results:
+            parts.append(
+                f"{result.get('provider')} returned {result.get('label')} "
+                f"with {result.get('confidence')}% confidence."
+            )
+
+        for key in ("gemini_result", "groq_result"):
+            result = verification_result.get(key) or {}
+            if result.get("status") != "verified" and result.get("error"):
+                parts.append(f"{result.get('provider')} verification was unavailable.")
     else:
-        parts.append("External verification was unavailable, so the primary model decision was used.")
+        parts.append("Gemini/Groq verification was unavailable, so the primary result was used.")
 
     return " ".join(parts)
+
+
+def _fallback_primary_result(cleaned_text, reason):
+    signal_score = _fake_signal_score(cleaned_text)
+    word_count = len(cleaned_text.split())
+
+    if signal_score >= 4:
+        label = "Fake News"
+        confidence = min(90.0, 68.0 + (signal_score * 4.0))
+    elif signal_score >= 2:
+        label = "Fake News"
+        confidence = min(80.0, 60.0 + (signal_score * 4.0))
+    elif word_count < 12:
+        label = "Fake News"
+        confidence = 52.0
+    else:
+        label = "Real News"
+        confidence = 55.0
+
+    other_label_confidence = round(100.0 - confidence, 2)
+    fake_confidence = confidence if label == "Fake News" else other_label_confidence
+    real_confidence = confidence if label == "Real News" else other_label_confidence
+
+    return {
+        "label": label,
+        "confidence": round(confidence, 2),
+        "fake_confidence": round(fake_confidence, 2),
+        "real_confidence": round(real_confidence, 2),
+        "signal_score": signal_score,
+        "model_status": "model_warming",
+        "model_note": reason,
+    }
+
+
+def _format_analysis_response(primary_result, verification_result, merged_result, decision_reason):
+    return {
+        "prediction": merged_result["prediction"],
+        "confidence": merged_result["confidence"],
+        "decision_reason": decision_reason,
+        "primary_prediction": primary_result["label"],
+        "primary_confidence": primary_result["confidence"],
+        "primary_fake_confidence": primary_result["fake_confidence"],
+        "primary_real_confidence": primary_result["real_confidence"],
+        "primary_model_status": primary_result.get("model_status", "ready"),
+        "primary_model_note": primary_result.get("model_note", ""),
+        "signal_score": primary_result.get("signal_score", 0),
+        "verification_provider": verification_result.get("provider"),
+        "verification_model": verification_result.get("model"),
+        "verification_status": verification_result.get("status"),
+        "verification_prediction": verification_result.get("label"),
+        "verification_confidence": verification_result.get("confidence"),
+        "verification_explanation": verification_result.get("explanation"),
+        "verification_error": verification_result.get("error", ""),
+        "verification_results": verification_result.get("results", []),
+        "gemini_result": verification_result.get("gemini_result"),
+        "groq_result": verification_result.get("groq_result"),
+    }
 
 
 # def predict_text(text):
@@ -434,11 +714,28 @@ def predict_text(text):
 
 
 def analyze_text(text):
-    _load_model()
     cleaned_text = (text or "").strip()
 
     if not cleaned_text:
         raise ValueError("Empty input text")
+
+    if not _is_model_ready():
+        load_model_background()
+        primary_result = _fallback_primary_result(
+            cleaned_text,
+            "The full BERT model is still warming up.",
+        )
+        verification_result = _verify_with_llm(
+            cleaned_text,
+            primary_result["label"],
+            primary_result["confidence"],
+        )
+        merged_result = _merge_predictions(primary_result, verification_result)
+        _apply_fake_confidence_caps(primary_result, verification_result, merged_result)
+        decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
+        return _format_analysis_response(primary_result, verification_result, merged_result, decision_reason)
+
+    torch = _torch
 
     inputs = _tokenizer(
         cleaned_text,
@@ -488,28 +785,15 @@ def analyze_text(text):
         "fake_confidence": round(fake_prob * 100, 2),
         "real_confidence": round(real_prob * 100, 2),
         "signal_score": signal_score,
+        "model_status": "ready",
+        "model_note": "",
     }
     verification_result = _verify_with_llm(cleaned_text, primary_label, primary_confidence)
     merged_result = _merge_predictions(primary_result, verification_result)
+    _apply_fake_confidence_caps(primary_result, verification_result, merged_result)
     decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
 
-    return {
-        "prediction": merged_result["prediction"],
-        "confidence": merged_result["confidence"],
-        "decision_reason": decision_reason,
-        "primary_prediction": primary_label,
-        "primary_confidence": primary_confidence,
-        "primary_fake_confidence": primary_result["fake_confidence"],
-        "primary_real_confidence": primary_result["real_confidence"],
-        "signal_score": signal_score,
-        "verification_provider": verification_result.get("provider"),
-        "verification_model": verification_result.get("model"),
-        "verification_status": verification_result.get("status"),
-        "verification_prediction": verification_result.get("label"),
-        "verification_confidence": verification_result.get("confidence"),
-        "verification_explanation": verification_result.get("explanation"),
-        "verification_error": verification_result.get("error", ""),
-    }
+    return _format_analysis_response(primary_result, verification_result, merged_result, decision_reason)
 
 
 # def extract_text_from_url(url):
@@ -615,8 +899,19 @@ def extract_text_from_url(url):
     """
 
     def _url_variants(input_url):
-        base = (input_url or "").strip()
+        base = _normalize_article_url(input_url)
+        parsed = urlparse(base)
         variants = [base]
+
+        alt_scheme = "http" if parsed.scheme == "https" else "https"
+        variants.append(urlunparse(parsed._replace(scheme=alt_scheme)))
+
+        if parsed.netloc.startswith("www."):
+            variants.append(urlunparse(parsed._replace(netloc=parsed.netloc[4:])))
+        else:
+            variants.append(urlunparse(parsed._replace(netloc=f"www.{parsed.netloc}")))
+
+        base = variants[0]
         if "?" in base:
             variants.append(f"{base}&output=amp")
             variants.append(f"{base}&amp=1")
@@ -625,16 +920,22 @@ def extract_text_from_url(url):
             variants.append(f"{base}?amp=1")
         if not base.endswith("/amp"):
             variants.append(f"{base.rstrip('/')}/amp")
-        return [u for i, u in enumerate(variants) if u and u not in variants[:i]]
+        max_variants = _get_env_int("URL_MAX_FETCH_VARIANTS", 8)
+        return [u for i, u in enumerate(variants) if u and u not in variants[:i]][:max_variants]
+
+    candidate_urls = _url_variants(url)
+    fetch_timeout = _get_env_int("URL_FETCH_TIMEOUT", 10)
+    curl_requests = _get_curl_requests()
+    requests = _get_requests()
 
     # -------- STEP 1: newspaper3k --------
     try:
         from newspaper import Article, Config
         config = Config()
         config.browser_user_agent = ARTICLE_REQUEST_HEADERS["User-Agent"]
-        config.request_timeout = 10
+        config.request_timeout = fetch_timeout
 
-        article = Article(url, config=config)
+        article = Article(candidate_urls[0], config=config)
         article.download()
         article.parse()
 
@@ -648,16 +949,16 @@ def extract_text_from_url(url):
     # -------- STEP 2: CURL (BEST BYPASS) --------
     try:
         if curl_requests is not None:
-            for candidate_url in _url_variants(url):
-                for browser_profile in ("chrome124", "chrome123", "safari15_5"):
+            for candidate_url in candidate_urls:
+                for browser_profile in ("chrome124", "chrome123"):
                     response = curl_requests.get(
                         candidate_url,
                         headers=ARTICLE_REQUEST_HEADERS,
                         impersonate=browser_profile,
-                        timeout=20,
+                        timeout=fetch_timeout,
                         allow_redirects=True,
                     )
-                    if response.status_code == 200 and response.text:
+                    if 200 <= response.status_code < 400 and response.text:
                         html = response.text
                         break
                 if html:
@@ -667,12 +968,12 @@ def extract_text_from_url(url):
 
     # -------- STEP 3: requests fallback --------
     if not html:
-        for candidate_url in _url_variants(url):
+        for candidate_url in candidate_urls:
             try:
                 res = requests.get(
                     candidate_url,
                     headers=ARTICLE_REQUEST_HEADERS,
-                    timeout=20,
+                    timeout=fetch_timeout,
                     allow_redirects=True,
                 )
                 res.raise_for_status()
@@ -704,6 +1005,8 @@ def extract_text_from_url(url):
         pass
 
     # -------- STEP 5: BeautifulSoup parsing --------
+    from bs4 import BeautifulSoup
+
     soup = BeautifulSoup(html, "html.parser")
 
     # Try JSON-LD article bodies before aggressive cleanup.
@@ -798,6 +1101,14 @@ def load_model_background():
     Load model in background thread (call on Django startup).
     This way, the model is ready when first request comes in.
     """
+    global _model_load_thread
+
+    with _model_start_lock:
+        if _is_model_ready():
+            return _model_load_thread
+        if _model_load_thread is not None and _model_load_thread.is_alive():
+            return _model_load_thread
+
     def _load():
         try:
             _load_model()
@@ -806,5 +1117,6 @@ def load_model_background():
             logger.error(f" Background model loading failed: {e}")
     
     thread = threading.Thread(target=_load, daemon=True)
+    _model_load_thread = thread
     thread.start()
     return thread

@@ -10,7 +10,7 @@ class Prediction(models.Model):
         blank=True,
     )
     text = models.TextField()
-    result = models.CharField(max_length=20)
+    result = models.CharField(max_length=50)
     confidence = models.FloatField()
     verification_result = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -5,7 +5,14 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Prediction
 from .serializers import PredictionSerializer
-from .utils import analyze_text, extract_text_from_url
+
+
+def _looks_like_url(value):
+    value = (value or "").strip().lower()
+    return (
+        value.startswith(("http://", "https://", "www."))
+        or ((" " not in value) and "." in value)
+    )
 
 
 @ensure_csrf_cookie
@@ -94,55 +101,70 @@ def auth_me(request):
 
 @api_view(["POST"])
 def predict_news(request):
-    if not request.user.is_authenticated:
-        return Response({"error": "Authentication required."}, status=401)
-
-    text = request.data.get("text", "")
-    url = request.data.get("url", "")
+    text = (request.data.get("text") or "").strip()
+    url = (request.data.get("url") or "").strip()
 
     if url:
-        try:
-            text = extract_text_from_url(url)
-        except Exception as exc:
-            # Allow manual pasted text to continue if URL extraction is blocked.
-            if not text:
-                return Response({"error": f"Could not extract article text: {str(exc)}"}, status=400)
+        if _looks_like_url(url):
+            try:
+                from .utils import extract_text_from_url
+
+                text = extract_text_from_url(url)
+            except Exception as exc:
+                # Allow manual pasted text to continue if URL extraction is blocked.
+                if not text:
+                    return Response({"error": f"Could not extract article text: {str(exc)}"}, status=400)
+        else:
+            text = f"{text}\n\n{url}".strip()
 
     if not text:
         return Response({"error": "No text provided"}, status=400)
 
     try:
+        from .utils import analyze_text
+
         analysis = analyze_text(text)
     except Exception as exc:
         return Response({"error": f"Prediction failed: {str(exc)}"}, status=500)
 
-    Prediction.objects.create(
-        user=request.user,
-        text=text,
-        result=analysis["prediction"],
-        confidence=analysis["confidence"],
-        verification_result={
-            "decision_reason": analysis["decision_reason"],
-            "signal_score": analysis["signal_score"],
-            "primary_prediction": analysis["primary_prediction"],
-            "primary_confidence": analysis["primary_confidence"],
-            "provider": analysis["verification_provider"],
-            "model": analysis["verification_model"],
-            "status": analysis["verification_status"],
-            "prediction": analysis["verification_prediction"],
-            "confidence": analysis["verification_confidence"],
-            "explanation": analysis["verification_explanation"],
-            "error": analysis["verification_error"],
-        },
-    )
+    if request.user.is_authenticated:
+        Prediction.objects.create(
+            user=request.user,
+            text=text,
+            result=analysis["prediction"],
+            confidence=analysis["confidence"],
+            verification_result={
+                "decision_reason": analysis["decision_reason"],
+                "signal_score": analysis["signal_score"],
+                "primary_prediction": analysis["primary_prediction"],
+                "primary_confidence": analysis["primary_confidence"],
+                "provider": analysis["verification_provider"],
+                "model": analysis["verification_model"],
+                "status": analysis["verification_status"],
+                "prediction": analysis["verification_prediction"],
+                "confidence": analysis["verification_confidence"],
+                "explanation": analysis["verification_explanation"],
+                "error": analysis["verification_error"],
+                "results": analysis.get("verification_results", []),
+                "gemini_result": analysis.get("gemini_result"),
+                "groq_result": analysis.get("groq_result"),
+                "primary_model_status": analysis.get("primary_model_status"),
+                "primary_model_note": analysis.get("primary_model_note"),
+            },
+        )
 
     return Response({
         "prediction": analysis["prediction"],
         "confidence": analysis["confidence"],
+        "text": text,
         "decision_reason": analysis["decision_reason"],
         "signal_score": analysis["signal_score"],
         "primary_prediction": analysis["primary_prediction"],
         "primary_confidence": analysis["primary_confidence"],
+        "primary_fake_confidence": analysis.get("primary_fake_confidence"),
+        "primary_real_confidence": analysis.get("primary_real_confidence"),
+        "primary_model_status": analysis.get("primary_model_status"),
+        "primary_model_note": analysis.get("primary_model_note"),
         "verification_status": analysis["verification_status"],
         "verification_provider": analysis["verification_provider"],
         "verification_model": analysis["verification_model"],
@@ -150,13 +172,16 @@ def predict_news(request):
         "verification_confidence": analysis["verification_confidence"],
         "verification_explanation": analysis["verification_explanation"],
         "verification_error": analysis["verification_error"],
+        "verification_results": analysis.get("verification_results", []),
+        "gemini_result": analysis.get("gemini_result"),
+        "groq_result": analysis.get("groq_result"),
     })
 
 
 @api_view(["GET"])
 def prediction_history(request):
     if not request.user.is_authenticated:
-        return Response({"error": "Authentication required."}, status=401)
+        return Response([])
 
     predictions = Prediction.objects.filter(user=request.user).order_by("-created_at")
     serializer = PredictionSerializer(predictions, many=True)

@@ -94,6 +94,10 @@
             signal_score: toNumber(item.signal_score ?? verification.signal_score, -1),
             primary_prediction: item.primary_prediction || verification.primary_prediction || "N/A",
             primary_confidence: toNumber(item.primary_confidence ?? verification.primary_confidence, -1),
+            primary_fake_confidence: toNumber(item.primary_fake_confidence ?? verification.primary_fake_confidence, -1),
+            primary_real_confidence: toNumber(item.primary_real_confidence ?? verification.primary_real_confidence, -1),
+            primary_model_status: item.primary_model_status || verification.primary_model_status || "ready",
+            primary_model_note: item.primary_model_note || verification.primary_model_note || "",
             verification_status: item.verification_status || verification.status || "unknown",
             verification_provider: item.verification_provider || verification.provider || "N/A",
             verification_model: item.verification_model || verification.model || "N/A",
@@ -101,7 +105,33 @@
             verification_confidence: toNumber(item.verification_confidence ?? verification.confidence, -1),
             verification_explanation: item.verification_explanation || verification.explanation || "",
             verification_error: item.verification_error || verification.error || "",
+            gemini_result: item.gemini_result || verification.gemini_result || null,
+            groq_result: item.groq_result || verification.groq_result || null,
           };
+        };
+
+        const renderVerifierCard = (title, result) => {
+          const data = result || {};
+          const status = data.status || "skipped";
+          const prediction = data.label || "N/A";
+          const confidence = Number.isFinite(Number(data.confidence)) ? `${Number(data.confidence)}%` : "N/A";
+          const model = data.model || "N/A";
+          const note = data.explanation || "";
+          const error = data.error || "";
+          const tone = status === "verified"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-amber-200 bg-amber-50 text-amber-800";
+          return `
+            <div class="rounded-xl border p-4 ${tone}">
+              <p class="text-xs font-semibold uppercase tracking-wide">${title}</p>
+              <p class="mt-2 text-sm">Status: <strong>${status}</strong></p>
+              <p class="mt-1 text-sm">Model: ${model}</p>
+              <p class="mt-1 text-sm">Prediction: <strong>${prediction}</strong></p>
+              <p class="mt-1 text-sm">Confidence: ${confidence}</p>
+              ${note ? `<p class="mt-2 text-sm">Note: ${note}</p>` : ""}
+              ${error ? `<p class="mt-2 text-xs text-rose-700">Error: ${error}</p>` : ""}
+            </div>
+          `;
         };
 
         const render = (raw) => {
@@ -117,6 +147,12 @@
 
           const primaryConfidenceText = data.primary_confidence >= 0
             ? `${data.primary_confidence}%`
+            : "N/A";
+          const primaryFakeText = data.primary_fake_confidence >= 0
+            ? `${data.primary_fake_confidence}%`
+            : "N/A";
+          const primaryRealText = data.primary_real_confidence >= 0
+            ? `${data.primary_real_confidence}%`
             : "N/A";
           const verificationConfidenceText = data.verification_confidence >= 0
             ? `${data.verification_confidence}%`
@@ -137,9 +173,12 @@
             <div class="mt-4 grid gap-3 md:grid-cols-2">
               <div class="rounded-xl border border-slate-200 bg-white p-4">
                 <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Primary Model</p>
+                <p class="mt-2 text-sm text-slate-700">Status: <strong>${data.primary_model_status}</strong></p>
                 <p class="mt-2 text-sm text-slate-700">Prediction: <strong>${data.primary_prediction}</strong></p>
                 <p class="mt-1 text-sm text-slate-600">Confidence: ${primaryConfidenceText}</p>
+                <p class="mt-1 text-sm text-slate-600">Fake: ${primaryFakeText} | Real: ${primaryRealText}</p>
                 <p class="mt-1 text-sm text-slate-600">Signal Score: ${signalScoreText}</p>
+                ${data.primary_model_note ? `<p class="mt-2 text-xs text-amber-700">${data.primary_model_note}</p>` : ""}
               </div>
               <div class="rounded-xl border p-4 ${statusTone}">
                 <p class="text-xs font-semibold uppercase tracking-wide">External Verification</p>
@@ -151,6 +190,10 @@
                 ${data.verification_explanation ? `<p class="mt-2 text-sm">Note: ${data.verification_explanation}</p>` : ""}
                 ${data.verification_error ? `<p class="mt-2 text-xs text-rose-700">Error: ${data.verification_error}</p>` : ""}
               </div>
+            </div>
+            <div class="mt-4 grid gap-3 md:grid-cols-2">
+              ${renderVerifierCard("Gemini", data.gemini_result)}
+              ${renderVerifierCard("Groq", data.groq_result)}
             </div>
             <p class="mt-4 text-sm text-slate-600 whitespace-pre-line">${data.text}</p>
             <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">

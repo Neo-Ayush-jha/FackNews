@@ -35,9 +35,9 @@
             <label class="text-sm font-medium text-slate-600" for="newsUrl">Paste article URL</label>
             <input
               id="newsUrl"
-              type="url"
+              type="text"
               class="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-              placeholder="https://example.com/news"
+              placeholder="https://example.com/news or paste a headline"
             />
           </div>
           <div class="mt-6 flex flex-wrap items-center gap-4">
@@ -134,6 +134,14 @@
           }));
         };
 
+        const looksLikeUrl = (value) => {
+          const cleaned = value.trim().toLowerCase();
+          return cleaned.startsWith("http://")
+            || cleaned.startsWith("https://")
+            || cleaned.startsWith("www.")
+            || (!cleaned.includes(" ") && cleaned.includes("."));
+        };
+
         const fetchHistory = async () => {
           try {
             historyEl.innerHTML = "<p>Loading history...</p>";
@@ -163,8 +171,12 @@
         detectForm.addEventListener("submit", async (event) => {
           event.preventDefault();
           errorEl.textContent = "";
-          const text = newsText.value.trim();
-          const url = newsUrl.value.trim();
+          const pastedText = newsText.value.trim();
+          const rawUrlOrText = newsUrl.value.trim();
+          const url = rawUrlOrText && looksLikeUrl(rawUrlOrText) ? rawUrlOrText : "";
+          const text = rawUrlOrText && !url
+            ? [pastedText, rawUrlOrText].filter(Boolean).join("\n\n")
+            : pastedText;
           if (!text && !url) {
             errorEl.textContent = "Please add text or a URL.";
             return;
@@ -183,7 +195,7 @@
             if (!response.ok) {
               throw new Error(payload.error || "Prediction failed");
             }
-            const latest = { ...payload, text: text || url };
+            const latest = { ...payload, text: payload.text || text || url };
             renderResult(latest);
             saveLatest(latest);
             setStatus("Done", "text-emerald-600");
