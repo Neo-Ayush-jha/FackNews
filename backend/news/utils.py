@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import logging
+import random
 from urllib.parse import urlparse, urlunparse
 
 
@@ -202,70 +203,79 @@ def _clip_confidence(value, fallback=50.0):
         return round(fallback, 2)
 
 
-def _fake_confidence_cap():
-    cap_value = os.getenv("FAKE_CONFIDENCE_MAX", "20")
-    try:
-        cap = float(cap_value)
-    except (TypeError, ValueError):
-        cap = 20.0
-    return max(0.0, min(100.0, cap))
+def _add_display_variation(value, spread=2.0):
+    return value + random.uniform(-spread, spread)
 
 
-def _cap_if_fake(label, confidence):
-    clipped = _clip_confidence(confidence)
-    if _normalize_prediction(label) == "Fake News":
-        return round(min(clipped, _fake_confidence_cap()), 2)
-    return clipped
+def _scale_fake_confidence(confidence, signal_score=0):
+    clipped = _clip_confidence(confidence, fallback=50.0)
+    signal_bonus = min(8.0, max(0.0, float(signal_score)) * 1.2)
+
+    if clipped >= 70.0:
+        scaled = 86.0 + ((clipped - 70.0) * 0.35)
+    elif clipped >= 50.0:
+        scaled = 80.0 + ((clipped - 50.0) * 0.30)
+    else:
+        scaled = 74.0 + (clipped * 0.12)
+
+    scaled = _add_display_variation(scaled + signal_bonus, spread=2.75)
+    return _clip_confidence(max(72.0, min(98.0, scaled)), fallback=85.0)
 
 
-def _boost_if_real(confidence):
-    clipped = _clip_confidence(confidence)
-    if clipped <= 60.0:
-        return clipped
+def _scale_real_confidence(confidence):
+    clipped = _clip_confidence(confidence, fallback=50.0)
 
-    # Map Real confidence above 60 into an 80-90 display range.
-    boosted = 80.0 + min(10.0, (clipped - 60.0) * 0.25)
-    return round(boosted, 2)
+    if clipped >= 70.0:
+        scaled = 82.0 + ((clipped - 70.0) * 0.45)
+    elif clipped >= 50.0:
+        scaled = 74.0 + ((clipped - 50.0) * 0.40)
+    else:
+        scaled = 62.0 + (clipped * 0.20)
+
+    scaled = _add_display_variation(scaled, spread=1.8)
+    return _clip_confidence(max(55.0, min(97.0, scaled)), fallback=78.0)
 
 
 def _apply_fake_confidence_caps(primary_result, verification_result, merged_result):
+    signal_score = primary_result.get("signal_score", 0)
+
     if primary_result.get("label") == "Fake News":
-        primary_result["confidence"] = _cap_if_fake("Fake News", primary_result.get("confidence"))
-        primary_result["fake_confidence"] = _cap_if_fake("Fake News", primary_result.get("fake_confidence"))
+        fake_conf = _scale_fake_confidence(primary_result.get("fake_confidence"), signal_score=signal_score)
+        primary_result["confidence"] = fake_conf
+        primary_result["fake_confidence"] = fake_conf
+        primary_result["real_confidence"] = _clip_confidence(100.0 - fake_conf)
+    else:
+        real_conf = _scale_real_confidence(primary_result.get("real_confidence"))
+        primary_result["confidence"] = real_conf
+        primary_result["real_confidence"] = real_conf
+        primary_result["fake_confidence"] = _clip_confidence(100.0 - real_conf)
 
     if verification_result.get("label") == "Fake News":
-        verification_result["confidence"] = _cap_if_fake("Fake News", verification_result.get("confidence"))
+        verification_result["confidence"] = _scale_fake_confidence(verification_result.get("confidence"), signal_score=signal_score)
+    elif verification_result.get("label") == "Real News":
+        verification_result["confidence"] = _scale_real_confidence(verification_result.get("confidence"))
 
     for key in ("gemini_result", "groq_result"):
         provider_result = verification_result.get(key)
-        if isinstance(provider_result, dict) and provider_result.get("label") == "Fake News":
-            provider_result["confidence"] = _cap_if_fake("Fake News", provider_result.get("confidence"))
+        if not isinstance(provider_result, dict):
+            continue
+        if provider_result.get("label") == "Fake News":
+            provider_result["confidence"] = _scale_fake_confidence(provider_result.get("confidence"), signal_score=signal_score)
+        elif provider_result.get("label") == "Real News":
+            provider_result["confidence"] = _scale_real_confidence(provider_result.get("confidence"))
 
     for result in verification_result.get("results") or []:
-        if isinstance(result, dict) and result.get("label") == "Fake News":
-            result["confidence"] = _cap_if_fake("Fake News", result.get("confidence"))
+        if not isinstance(result, dict):
+            continue
+        if result.get("label") == "Fake News":
+            result["confidence"] = _scale_fake_confidence(result.get("confidence"), signal_score=signal_score)
+        elif result.get("label") == "Real News":
+            result["confidence"] = _scale_real_confidence(result.get("confidence"))
 
     if merged_result.get("prediction") == "Fake News":
-        merged_result["confidence"] = _cap_if_fake("Fake News", merged_result.get("confidence"))
-
-    if primary_result.get("label") == "Real News":
-        primary_result["confidence"] = _boost_if_real(primary_result.get("confidence"))
-        primary_result["real_confidence"] = _boost_if_real(primary_result.get("real_confidence"))
-
-    if verification_result.get("label") == "Real News":
-        verification_result["confidence"] = _boost_if_real(verification_result.get("confidence"))
-
-    for key in ("gemini_result", "groq_result"):
-        provider_result = verification_result.get(key)
-        if isinstance(provider_result, dict) and provider_result.get("label") == "Real News":
-            provider_result["confidence"] = _boost_if_real(provider_result.get("confidence"))
-
-    for result in verification_result.get("results") or []:
-        if isinstance(result, dict) and result.get("label") == "Real News":
-            result["confidence"] = _boost_if_real(result.get("confidence"))
-
-    if merged_result.get("prediction") == "Real News":
-        merged_result["confidence"] = _boost_if_real(merged_result.get("confidence"))
+        merged_result["confidence"] = _scale_fake_confidence(merged_result.get("confidence"), signal_score=signal_score)
+    elif merged_result.get("prediction") == "Real News":
+        merged_result["confidence"] = _scale_real_confidence(merged_result.get("confidence"))
 
 
 def _get_env_value(*keys):
@@ -622,20 +632,18 @@ def _build_decision_reason(primary_result, verification_result, merged_result):
 
 def _fallback_primary_result(cleaned_text, reason):
     signal_score = _fake_signal_score(cleaned_text)
-    word_count = len(cleaned_text.split())
 
-    if signal_score >= 4:
+    # Warm-up mode: keep fake outputs conservative and favor real when
+    # suspicious language signals are weak.
+    if signal_score >= 6:
         label = "Fake News"
-        confidence = min(90.0, 68.0 + (signal_score * 4.0))
-    elif signal_score >= 2:
+        confidence = 36.0
+    elif signal_score >= 3:
         label = "Fake News"
-        confidence = min(80.0, 60.0 + (signal_score * 4.0))
-    elif word_count < 12:
-        label = "Fake News"
-        confidence = 52.0
+        confidence = 28.0
     else:
         label = "Real News"
-        confidence = 55.0
+        confidence = 72.0
 
     other_label_confidence = round(100.0 - confidence, 2)
     fake_confidence = confidence if label == "Fake News" else other_label_confidence
@@ -720,10 +728,21 @@ def analyze_text(text):
         raise ValueError("Empty input text")
 
     if not _is_model_ready():
-        load_model_background()
+        load_error = ""
+        try:
+            _load_model()
+        except Exception as exc:
+            load_error = str(exc)
+            logger.warning("Synchronous model load failed, using warm fallback: %s", exc)
+            load_model_background()
+
+    if not _is_model_ready():
+        warm_reason = "The full BERT model is still warming up."
+        if load_error:
+            warm_reason = f"The full BERT model is still warming up ({load_error})."
         primary_result = _fallback_primary_result(
             cleaned_text,
-            "The full BERT model is still warming up.",
+            warm_reason,
         )
         verification_result = _verify_with_llm(
             cleaned_text,
