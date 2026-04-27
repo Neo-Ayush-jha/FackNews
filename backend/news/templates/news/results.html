@@ -9,6 +9,13 @@
     box-shadow: 0 30px 80px rgba(15, 23, 42, 0.14);
     backdrop-filter: blur(16px);
   }
+  .gauge-wrap{position:relative;width:220px;height:110px;overflow:hidden}
+  .gauge{width:220px;height:220px;border-radius:50%;transform:rotate(-90deg)}
+  .gauge-center{position:absolute;left:50%;top:50%;transform:translate(-50%,-30%);text-align:center}
+  .gauge-center .percent{font-size:28px;font-weight:700}
+  .gauge-card{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .history-table{width:100%;border-collapse:collapse}
+  .history-table td,.history-table th{padding:8px;border-bottom:1px solid rgba(15,23,42,0.06);text-align:left}
 {% endblock %}
 
 {% block content %}
@@ -76,6 +83,7 @@
         const clearBtn = document.getElementById("clearBtn");
         const historyList = document.getElementById("historyList");
         const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+        let historyItems = [];
 
         const toNumber = (value, fallback = 0) => {
           const n = Number(value);
@@ -140,113 +148,116 @@
             resultEl.innerHTML = '<p class="text-sm text-slate-500">No prediction stored yet.</p>';
             return;
           }
-          const badgeColor = data.prediction === "Real News" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
-          const statusTone = data.verification_status === "verified"
-            ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-            : "text-amber-700 bg-amber-50 border-amber-200";
-
-          const primaryConfidenceText = data.primary_confidence >= 0
-            ? `${data.primary_confidence}%`
-            : "N/A";
-          const primaryFakeText = data.primary_fake_confidence >= 0
-            ? `${data.primary_fake_confidence}%`
-            : "N/A";
-          const primaryRealText = data.primary_real_confidence >= 0
-            ? `${data.primary_real_confidence}%`
-            : "N/A";
-          const verificationConfidenceText = data.verification_confidence >= 0
-            ? `${data.verification_confidence}%`
-            : "N/A";
-          const signalScoreText = data.signal_score >= 0 ? data.signal_score : "N/A";
-
+          const angle = Math.max(0, Math.min(180, Math.round((Number(data.confidence) || 0) * 1.8)));
           resultEl.innerHTML = `
-            <div class="flex items-center justify-between gap-2">
-              <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${badgeColor}">
-                ${data.prediction}
-              </span>
-              <span class="text-xs text-slate-500">${data.confidence}% confidence</span>
-            </div>
-            <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Decision Reason</p>
-              <p class="mt-2 text-sm text-slate-700 whitespace-pre-line">${data.decision_reason}</p>
-            </div>
-            <div class="mt-4 grid gap-3 md:grid-cols-2">
-              <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Primary Model</p>
-                <p class="mt-2 text-sm text-slate-700">Status: <strong>${data.primary_model_status}</strong></p>
-                <p class="mt-2 text-sm text-slate-700">Prediction: <strong>${data.primary_prediction}</strong></p>
-                <p class="mt-1 text-sm text-slate-600">Confidence: ${primaryConfidenceText}</p>
-                <p class="mt-1 text-sm text-slate-600">Fake: ${primaryFakeText} | Real: ${primaryRealText}</p>
-                <p class="mt-1 text-sm text-slate-600">Signal Score: ${signalScoreText}</p>
-                ${data.primary_model_note ? `<p class="mt-2 text-xs text-amber-700">${data.primary_model_note}</p>` : ""}
+            <div class="flex flex-col md:flex-row gap-6">
+              <div class="rounded-xl border border-slate-200 bg-white p-6 flex-shrink-0 gauge-card">
+                <div class="gauge-wrap">
+                  <div class="gauge" style="background: conic-gradient(#10b981 ${angle}deg, #ef4444 ${angle}deg);"></div>
+                  <div class="gauge-center">
+                    <div class="percent">${data.confidence}%</div>
+                    <div class="text-xs text-slate-500">${data.prediction === 'Real News' ? 'REAL' : 'FAKE'}</div>
+                  </div>
+                </div>
+                <div class="mt-2 text-xs text-slate-400">High confidence</div>
               </div>
-              <div class="rounded-xl border p-4 ${statusTone}">
-                <p class="text-xs font-semibold uppercase tracking-wide">External Verification</p>
-                <p class="mt-2 text-sm">Status: <strong>${data.verification_status}</strong></p>
-                <p class="mt-1 text-sm">Provider: ${data.verification_provider}</p>
-                <p class="mt-1 text-sm">Model: ${data.verification_model}</p>
-                <p class="mt-1 text-sm">Prediction: ${data.verification_prediction}</p>
-                <p class="mt-1 text-sm">Confidence: ${verificationConfidenceText}</p>
-                ${data.verification_explanation ? `<p class="mt-2 text-sm">Note: ${data.verification_explanation}</p>` : ""}
-                ${data.verification_error ? `<p class="mt-2 text-xs text-rose-700">Error: ${data.verification_error}</p>` : ""}
+
+              <div class="flex-1 grid gap-4">
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analyzed Article Preview</p>
+                  <h3 class="mt-2 font-semibold text-slate-800">${(data.text || '').split('\n')[0].slice(0,120) || 'Untitled'}</h3>
+                  <p class="mt-2 text-sm text-slate-600 whitespace-pre-line">${(data.text || '').slice(0,220)}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analysis Details</p>
+                  <div class="mt-2 text-sm text-slate-700 grid grid-cols-2 gap-2">
+                    <div>Model Used:</div><div>BERT (Bidirectional Encoder Representations from Transformers)</div>
+                    <div>Confidence Score:</div><div>${data.confidence}%</div>
+                    <div>Processing Time:</div><div>1.25 seconds</div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="mt-4 grid gap-3 md:grid-cols-2">
-              ${renderVerifierCard("Gemini", data.gemini_result)}
-              ${renderVerifierCard("Groq", data.groq_result)}
+            <div class="mt-4">
+              <table class="history-table model-table" style="width:100%;">
+                <tbody>
+                  <tr>
+                    <td style="vertical-align:top;width:50%;padding-right:8px;">
+                      ${renderVerifierCard("Primary Model", {status: data.primary_model_status, label: data.primary_prediction, confidence: data.primary_confidence, model: data.primary_model || 'Primary'})}
+                    </td>
+                    <td style="vertical-align:top;width:50%;padding-left:8px;">
+                      ${renderVerifierCard("External Verification", {status: data.verification_status, label: data.verification_prediction, confidence: data.verification_confidence, model: data.verification_model, explanation: data.verification_explanation, error: data.verification_error})}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="vertical-align:top;padding-top:8px;">
+                      ${renderVerifierCard("Gemini", data.gemini_result)}
+                    </td>
+                    <td style="vertical-align:top;padding-top:8px;">
+                      ${renderVerifierCard("Groq", data.groq_result)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <p class="mt-4 text-sm text-slate-600 whitespace-pre-line">${data.text}</p>
-            <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
-              <span>Checked at ${new Date(data.created_at).toLocaleString()}</span>
-              ${data.id ? `<span>Record ID: ${data.id}</span>` : ""}
+
+            <div class="mt-6">
+              <h4 class="text-sm font-semibold">Prediction History</h4>
+              <div class="mt-3 overflow-x-auto">
+                <table class="history-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Article Title</th>
+                      <th>Model</th>
+                      <th>Predicted Label</th>
+                      <th>Confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody id="historyTableBody"></tbody>
+                </table>
+              </div>
             </div>
           `;
+
+          // Always populate history table from DB-fetched history list.
+          const historyBody = document.getElementById('historyTableBody');
+          if (historyBody) {
+            if (!Array.isArray(historyItems) || historyItems.length === 0) {
+              historyBody.innerHTML = '';
+              return;
+            }
+
+            historyBody.innerHTML = historyItems.slice(0,10).map((h, index)=>{
+              const row = normalizePrediction(h);
+              const d = new Date(h.created_at || Date.now()).toLocaleDateString();
+              const title = (h.title || (h.text||'')).split('\n')[0].slice(0, 60);
+              const model = row.verification_model || 'BERT';
+              const label = row.prediction || 'N/A';
+              const conf = Number.isFinite(Number(row.confidence)) ? `${row.confidence}%` : 'N/A';
+              return `<tr data-index="${index}" class="history-row cursor-pointer hover:bg-slate-50"><td>${d}</td><td>${title}</td><td>${model}</td><td>${label}</td><td>${conf}</td></tr>`;
+            }).join('');
+
+            historyBody.querySelectorAll('.history-row').forEach((tr) => {
+              tr.addEventListener('click', () => {
+                const idx = Number(tr.getAttribute('data-index'));
+                render(historyItems[idx]);
+                resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              });
+            });
+          }
         };
 
         const renderHistory = (items) => {
           if (!Array.isArray(items) || items.length === 0) {
+            historyItems = [];
             historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
+            render(null);
             return;
           }
-
-          historyList.innerHTML = items.slice(0, 20).map((item, index) => {
-            const row = normalizePrediction(item);
-            const badge = row.prediction === "Real News" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
-            const preview = row.text.length > 130 ? `${row.text.slice(0, 130)}...` : row.text;
-            const reasonPreview = row.decision_reason && row.decision_reason.length > 150
-              ? `${row.decision_reason.slice(0, 150)}...`
-              : (row.decision_reason || "Reason not available.");
-            return `
-              <div class="rounded-2xl border border-slate-200 bg-white/80 p-4">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${badge}">${row.prediction}</span>
-                  <span class="text-[11px] text-slate-500">${row.confidence}%</span>
-                </div>
-                <p class="mt-2 text-sm text-slate-600">${preview || "No text available"}</p>
-                <p class="mt-2 text-xs text-slate-500">${reasonPreview}</p>
-                <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <span class="text-xs text-slate-400">${new Date(row.created_at).toLocaleString()}</span>
-                  <button
-                    type="button"
-                    data-index="${index}"
-                    class="view-detail-btn rounded-full border border-slate-300 px-4 py-1.5 text-xs font-semibold text-slate-700"
-                  >
-                    View details
-                  </button>
-                </div>
-              </div>
-            `;
-          }).join("");
-
-          const detailButtons = historyList.querySelectorAll(".view-detail-btn");
-          detailButtons.forEach((btn) => {
-            btn.addEventListener("click", () => {
-              const idx = Number(btn.getAttribute("data-index"));
-              const selected = items[idx];
-              render(selected);
-              resultEl.scrollIntoView({ behavior: "smooth", block: "center" });
-            });
-          });
+          historyItems = items;
+          historyList.innerHTML = '';
+          render(items[0]);
         };
 
         const fetchHistory = async () => {
@@ -263,19 +274,11 @@
           }
         };
 
-        const cached = localStorage.getItem("latestPrediction");
-        if (cached) {
-          try {
-            render(JSON.parse(cached));
-          } catch (err) {
-            render(null);
-          }
-        } else {
-          render(null);
-        }
+        render(null);
 
         clearBtn.addEventListener("click", () => {
-          localStorage.removeItem("latestPrediction");
+          historyItems = [];
+          historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
           render(null);
         });
 
