@@ -83,7 +83,6 @@
         const clearBtn = document.getElementById("clearBtn");
         const historyList = document.getElementById("historyList");
         const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
-        let historyItems = [];
 
         const toNumber = (value, fallback = 0) => {
           const n = Number(value);
@@ -148,7 +147,27 @@
             resultEl.innerHTML = '<p class="text-sm text-slate-500">No prediction stored yet.</p>';
             return;
           }
+          const badgeColor = data.prediction === "Real News" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
+          const statusTone = data.verification_status === "verified"
+            ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+            : "text-amber-700 bg-amber-50 border-amber-200";
+
+          const primaryConfidenceText = data.primary_confidence >= 0
+            ? `${data.primary_confidence}%`
+            : "N/A";
+          const primaryFakeText = data.primary_fake_confidence >= 0
+            ? `${data.primary_fake_confidence}%`
+            : "N/A";
+          const primaryRealText = data.primary_real_confidence >= 0
+            ? `${data.primary_real_confidence}%`
+            : "N/A";
+          const verificationConfidenceText = data.verification_confidence >= 0
+            ? `${data.verification_confidence}%`
+            : "N/A";
+          const signalScoreText = data.signal_score >= 0 ? data.signal_score : "N/A";
+
           const angle = Math.max(0, Math.min(180, Math.round((Number(data.confidence) || 0) * 1.8)));
+          const primaryNote = data.primary_model_note ? `<p class="mt-2 text-xs text-amber-700">${data.primary_model_note}</p>` : "";
           resultEl.innerHTML = `
             <div class="flex flex-col md:flex-row gap-6">
               <div class="rounded-xl border border-slate-200 bg-white p-6 flex-shrink-0 gauge-card">
@@ -178,29 +197,6 @@
                 </div>
               </div>
             </div>
-            <div class="mt-4">
-              <table class="history-table model-table" style="width:100%;">
-                <tbody>
-                  <tr>
-                    <td style="vertical-align:top;width:50%;padding-right:8px;">
-                      ${renderVerifierCard("Primary Model", {status: data.primary_model_status, label: data.primary_prediction, confidence: data.primary_confidence, model: data.primary_model || 'Primary'})}
-                    </td>
-                    <td style="vertical-align:top;width:50%;padding-left:8px;">
-                      ${renderVerifierCard("External Verification", {status: data.verification_status, label: data.verification_prediction, confidence: data.verification_confidence, model: data.verification_model, explanation: data.verification_explanation, error: data.verification_error})}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="vertical-align:top;padding-top:8px;">
-                      ${renderVerifierCard("Gemini", data.gemini_result)}
-                    </td>
-                    <td style="vertical-align:top;padding-top:8px;">
-                      ${renderVerifierCard("Groq", data.groq_result)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
             <div class="mt-6">
               <h4 class="text-sm font-semibold">Prediction History</h4>
               <div class="mt-3 overflow-x-auto">
@@ -209,55 +205,74 @@
                     <tr>
                       <th>Date</th>
                       <th>Article Title</th>
-                      <th>Model</th>
                       <th>Predicted Label</th>
                       <th>Confidence</th>
                     </tr>
                   </thead>
-                  <tbody id="historyTableBody"></tbody>
+                  <tbody id="historyTableBody">
+                    <tr><td colspan="4" class="text-sm text-slate-500">No history available</td></tr>
+                  </tbody>
                 </table>
               </div>
             </div>
           `;
-
-          // Always populate history table from DB-fetched history list.
+          // populate history table if history is available in raw
           const historyBody = document.getElementById('historyTableBody');
-          if (historyBody) {
-            if (!Array.isArray(historyItems) || historyItems.length === 0) {
-              historyBody.innerHTML = '';
-              return;
-            }
-
-            historyBody.innerHTML = historyItems.slice(0,10).map((h, index)=>{
-              const row = normalizePrediction(h);
+          if (Array.isArray(raw?.history) && raw.history.length){
+            historyBody.innerHTML = raw.history.slice(0,10).map(h=>{
               const d = new Date(h.created_at || Date.now()).toLocaleDateString();
-              const title = (h.title || (h.text||'')).split('\n')[0].slice(0, 60);
-              const model = row.verification_model || 'BERT';
-              const label = row.prediction || 'N/A';
-              const conf = Number.isFinite(Number(row.confidence)) ? `${row.confidence}%` : 'N/A';
-              return `<tr data-index="${index}" class="history-row cursor-pointer hover:bg-slate-50"><td>${d}</td><td>${title}</td><td>${model}</td><td>${label}</td><td>${conf}</td></tr>`;
+              const title = (h.title || (h.text||'')).slice(0,48);
+              const label = h.prediction || h.result || 'N/A';
+              const conf = Number.isFinite(Number(h.confidence))?`${h.confidence}`:'N/A';
+              return `<tr><td>${d}</td><td>${title}</td><td>${label}</td><td>${conf}</td></tr>`;
             }).join('');
-
-            historyBody.querySelectorAll('.history-row').forEach((tr) => {
-              tr.addEventListener('click', () => {
-                const idx = Number(tr.getAttribute('data-index'));
-                render(historyItems[idx]);
-                resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-            });
           }
         };
 
         const renderHistory = (items) => {
           if (!Array.isArray(items) || items.length === 0) {
-            historyItems = [];
             historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
-            render(null);
             return;
           }
-          historyItems = items;
-          historyList.innerHTML = '';
-          render(items[0]);
+
+          historyList.innerHTML = items.slice(0, 20).map((item, index) => {
+            const row = normalizePrediction(item);
+            const badge = row.prediction === "Real News" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
+            const preview = row.text.length > 130 ? `${row.text.slice(0, 130)}...` : row.text;
+            const reasonPreview = row.decision_reason && row.decision_reason.length > 150
+              ? `${row.decision_reason.slice(0, 150)}...`
+              : (row.decision_reason || "Reason not available.");
+            return `
+              <div class="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${badge}">${row.prediction}</span>
+                  <span class="text-[11px] text-slate-500">${row.confidence}%</span>
+                </div>
+                <p class="mt-2 text-sm text-slate-600">${preview || "No text available"}</p>
+                <p class="mt-2 text-xs text-slate-500">${reasonPreview}</p>
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <span class="text-xs text-slate-400">${new Date(row.created_at).toLocaleString()}</span>
+                  <button
+                    type="button"
+                    data-index="${index}"
+                    class="view-detail-btn rounded-full border border-slate-300 px-4 py-1.5 text-xs font-semibold text-slate-700"
+                  >
+                    View details
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join("");
+
+          const detailButtons = historyList.querySelectorAll(".view-detail-btn");
+          detailButtons.forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const idx = Number(btn.getAttribute("data-index"));
+              const selected = items[idx];
+              render(selected);
+              resultEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+          });
         };
 
         const fetchHistory = async () => {
@@ -274,11 +289,19 @@
           }
         };
 
-        render(null);
+        const cached = localStorage.getItem("latestPrediction");
+        if (cached) {
+          try {
+            render(JSON.parse(cached));
+          } catch (err) {
+            render(null);
+          }
+        } else {
+          render(null);
+        }
 
         clearBtn.addEventListener("click", () => {
-          historyItems = [];
-          historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
+          localStorage.removeItem("latestPrediction");
           render(null);
         });
 
