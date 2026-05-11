@@ -22,7 +22,7 @@
     <main class="mx-auto grid max-w-5xl gap-8 px-6 pb-16 pt-10">
       <section class="card rounded-3xl p-8">
         <p class="text-xs uppercase tracking-[0.3em] text-slate-500">Result</p>
-        <h1 class="serif mt-4 text-4xl font-semibold">Prediction Detail</h1>
+        <h1 class="serif mt-4 text-4xl font-semibold">Final Detection Result</h1>
         <div id="result" class="mt-6 rounded-2xl border border-slate-200 bg-white/80 p-6">
           <p class="text-sm text-slate-500">No prediction stored yet.</p>
         </div>
@@ -67,7 +67,7 @@
           </button>
         </div>
         <p class="mt-2 text-sm text-slate-500">
-          Kisi bhi news item par <strong>View details</strong> dabao aur uska full text, confidence, aur timestamp ऊपर dikhega.
+          Kisi bhi news item par <strong>View details</strong> dabao aur uska full text, confidence, aur timestamp upar dikhega.
         </p>
         <div id="historyList" class="mt-5 space-y-3">
           <p class="text-sm text-slate-500">Loading checked news...</p>
@@ -83,6 +83,7 @@
         const clearBtn = document.getElementById("clearBtn");
         const historyList = document.getElementById("historyList");
         const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+        const DISPLAY_MODEL_NAME = "BERT Fake News Detector";
         let historyItems = [];
 
         const toNumber = (value, fallback = 0) => {
@@ -91,55 +92,49 @@
         };
 
         const normalizePrediction = (item) => {
-          const verification = item?.verification_result || {};
           return {
             id: item.id || null,
             prediction: item.prediction || item.result || "Unknown",
             confidence: toNumber(item.confidence, 0),
             text: item.text || "",
             created_at: item.created_at || new Date().toISOString(),
-            decision_reason: item.decision_reason || verification.decision_reason || "Reason not available.",
-            signal_score: toNumber(item.signal_score ?? verification.signal_score, -1),
-            primary_prediction: item.primary_prediction || verification.primary_prediction || "N/A",
-            primary_confidence: toNumber(item.primary_confidence ?? verification.primary_confidence, -1),
-            primary_fake_confidence: toNumber(item.primary_fake_confidence ?? verification.primary_fake_confidence, -1),
-            primary_real_confidence: toNumber(item.primary_real_confidence ?? verification.primary_real_confidence, -1),
-            primary_model_status: item.primary_model_status || verification.primary_model_status || "ready",
-            primary_model_note: item.primary_model_note || verification.primary_model_note || "",
-            verification_status: item.verification_status || verification.status || "unknown",
-            verification_provider: item.verification_provider || verification.provider || "N/A",
-            verification_model: item.verification_model || verification.model || "N/A",
-            verification_prediction: item.verification_prediction || verification.prediction || "N/A",
-            verification_confidence: toNumber(item.verification_confidence ?? verification.confidence, -1),
-            verification_explanation: item.verification_explanation || verification.explanation || "",
-            verification_error: item.verification_error || verification.error || "",
-            gemini_result: item.gemini_result || verification.gemini_result || null,
-            groq_result: item.groq_result || verification.groq_result || null,
+            primary_model_status: item.primary_model_status || item?.verification_result?.primary_model_status || "ready",
           };
         };
 
-        const renderVerifierCard = (title, result) => {
-          const data = result || {};
-          const status = data.status || "skipped";
-          const prediction = data.label || "N/A";
-          const confidence = Number.isFinite(Number(data.confidence)) ? `${Number(data.confidence)}%` : "N/A";
-          const model = data.model || "N/A";
-          const note = data.explanation || "";
-          const error = data.error || "";
-          const tone = status === "verified"
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-            : "border-amber-200 bg-amber-50 text-amber-800";
-          return `
-            <div class="rounded-xl border p-4 ${tone}">
-              <p class="text-xs font-semibold uppercase tracking-wide">${title}</p>
-              <p class="mt-2 text-sm">Status: <strong>${status}</strong></p>
-              <p class="mt-1 text-sm">Model: ${model}</p>
-              <p class="mt-1 text-sm">Prediction: <strong>${prediction}</strong></p>
-              <p class="mt-1 text-sm">Confidence: ${confidence}</p>
-              ${note ? `<p class="mt-2 text-sm">Note: ${note}</p>` : ""}
-              ${error ? `<p class="mt-2 text-xs text-rose-700">Error: ${error}</p>` : ""}
-            </div>
-          `;
+        const formatPercent = (value) => {
+          const numericValue = Number(value);
+          if (!Number.isFinite(numericValue)) {
+            return "N/A";
+          }
+          const normalized = Number.isInteger(numericValue)
+            ? String(numericValue)
+            : numericValue.toFixed(2).replace(/\.?0+$/, "");
+          return `${normalized}%`;
+        };
+
+        const getAnalysisStatus = (data) => {
+          if (data.primary_model_status === "model_warming") {
+            return "Quick analysis complete";
+          }
+          return "Analysis complete";
+        };
+
+        const getResultSummary = (data) => {
+          if (data.prediction === "Real News") {
+            return "Our detector found reporting patterns that align with credible news writing.";
+          }
+          return "Our detector found language patterns often associated with misleading or fabricated stories.";
+        };
+
+        const getConfidenceMessage = (confidence) => {
+          if (confidence >= 85) {
+            return "Strong confidence from the detector.";
+          }
+          if (confidence >= 65) {
+            return "Moderate confidence with clear supporting signals.";
+          }
+          return "Lower confidence, so manual review is recommended.";
         };
 
         const render = (raw) => {
@@ -155,50 +150,41 @@
                 <div class="gauge-wrap">
                   <div class="gauge" style="background: conic-gradient(#10b981 ${angle}deg, #ef4444 ${angle}deg);"></div>
                   <div class="gauge-center">
-                    <div class="percent">${data.confidence}%</div>
+                    <div class="percent">${formatPercent(data.confidence)}</div>
                     <div class="text-xs text-slate-500">${data.prediction === 'Real News' ? 'REAL' : 'FAKE'}</div>
                   </div>
                 </div>
-                <div class="mt-2 text-xs text-slate-400">High confidence</div>
+                <div class="mt-2 text-xs text-slate-400">Model confidence</div>
               </div>
 
               <div class="flex-1 grid gap-4">
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Final Result</p>
+                  <div class="mt-3 flex flex-wrap items-center gap-3">
+                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${data.prediction === 'Real News' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
+                      ${data.prediction}
+                    </span>
+                    <span class="text-sm text-slate-600">${getConfidenceMessage(data.confidence)}</span>
+                  </div>
+                  <p class="mt-3 text-sm text-slate-600">${getResultSummary(data)}</p>
+                </div>
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analyzed Article Preview</p>
                   <h3 class="mt-2 font-semibold text-slate-800">${(data.text || '').split('\n')[0].slice(0,120) || 'Untitled'}</h3>
                   <p class="mt-2 text-sm text-slate-600 whitespace-pre-line">${(data.text || '').slice(0,220)}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analysis Details</p>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Model Output</p>
                   <div class="mt-2 text-sm text-slate-700 grid grid-cols-2 gap-2">
-                    <div>Model Used:</div><div>BERT (Bidirectional Encoder Representations from Transformers)</div>
-                    <div>Confidence Score:</div><div>${data.confidence}%</div>
-                    <div>Processing Time:</div><div>1.25 seconds</div>
+                    <div>Model Name:</div><div>${DISPLAY_MODEL_NAME}</div>
+                    <div>Final Prediction:</div><div>${data.prediction}</div>
+                    <div>Confidence Score:</div><div>${formatPercent(data.confidence)}</div>
+                    <div>Analysis Status:</div><div>${getAnalysisStatus(data)}</div>
+                    <div>Checked On:</div><div>${new Date(data.created_at || Date.now()).toLocaleString()}</div>
                   </div>
+                  ${data.primary_model_status === 'model_warming' ? '<p class="mt-3 text-xs text-amber-600">Quick analysis mode was used while the full detector finishes initializing.</p>' : ''}
                 </div>
               </div>
-            </div>
-            <div class="mt-4">
-              <table class="history-table model-table" style="width:100%;">
-                <tbody>
-                  <tr>
-                    <td style="vertical-align:top;width:50%;padding-right:8px;">
-                      ${renderVerifierCard("Primary Model", {status: data.primary_model_status, label: data.primary_prediction, confidence: data.primary_confidence, model: data.primary_model || 'Primary'})}
-                    </td>
-                    <td style="vertical-align:top;width:50%;padding-left:8px;">
-                      ${renderVerifierCard("External Verification", {status: data.verification_status, label: data.verification_prediction, confidence: data.verification_confidence, model: data.verification_model, explanation: data.verification_explanation, error: data.verification_error})}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="vertical-align:top;padding-top:8px;">
-                      ${renderVerifierCard("Gemini", data.gemini_result)}
-                    </td>
-                    <td style="vertical-align:top;padding-top:8px;">
-                      ${renderVerifierCard("Groq", data.groq_result)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
 
             <div class="mt-6">
@@ -209,7 +195,7 @@
                     <tr>
                       <th>Date</th>
                       <th>Article Title</th>
-                      <th>Model</th>
+                      <th>Detector</th>
                       <th>Predicted Label</th>
                       <th>Confidence</th>
                     </tr>
@@ -232,9 +218,9 @@
               const row = normalizePrediction(h);
               const d = new Date(h.created_at || Date.now()).toLocaleDateString();
               const title = (h.title || (h.text||'')).split('\n')[0].slice(0, 60);
-              const model = row.verification_model || 'BERT';
+              const model = DISPLAY_MODEL_NAME;
               const label = row.prediction || 'N/A';
-              const conf = Number.isFinite(Number(row.confidence)) ? `${row.confidence}%` : 'N/A';
+              const conf = formatPercent(row.confidence);
               return `<tr data-index="${index}" class="history-row cursor-pointer hover:bg-slate-50"><td>${d}</td><td>${title}</td><td>${model}</td><td>${label}</td><td>${conf}</td></tr>`;
             }).join('');
 
