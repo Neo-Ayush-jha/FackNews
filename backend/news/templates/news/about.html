@@ -4,65 +4,281 @@
 
 {% block extra_style %}
   .panel {
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+    background: rgba(255, 255, 255, 0.86);
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
     backdrop-filter: blur(16px);
+  }
+  .hero-panel {
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-panel::before {
+    content: "";
+    position: absolute;
+    inset: -20% auto auto -10%;
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle, rgba(43, 212, 162, 0.14) 0%, rgba(43, 212, 162, 0) 72%);
+    pointer-events: none;
+  }
+  .hero-panel::after {
+    content: "";
+    position: absolute;
+    inset: auto -8% -28% auto;
+    width: 320px;
+    height: 320px;
+    background: radial-gradient(circle, rgba(247, 199, 122, 0.18) 0%, rgba(247, 199, 122, 0) 72%);
+    pointer-events: none;
+  }
+  .accent-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 9999px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 255, 255, 0.78);
+    padding: 10px 14px;
+  }
+  .accent-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    background: linear-gradient(135deg, #2bd4a2 0%, #0f766e 100%);
+    box-shadow: 0 0 0 6px rgba(43, 212, 162, 0.12);
+  }
+  .step-card {
+    position: relative;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 255, 255, 0.78);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  }
+  .step-number {
+    display: inline-flex;
+    width: 34px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: #0b0f14;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .metric-tile {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(248, 250, 252, 0.96) 100%);
+  }
+  .team-card {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(248, 250, 252, 0.92);
+  }
+  .info-strip {
+    border: 1px dashed rgba(15, 23, 42, 0.14);
+    background: rgba(255, 255, 255, 0.62);
   }
 {% endblock %}
 
 {% block content %}
-    <main class="mx-auto grid max-w-5xl gap-8 px-6 pb-16 pt-10">
-      <section class="panel rounded-3xl p-8">
-        <p class="text-xs uppercase tracking-[0.3em] text-slate-500">How it works</p>
-        <h1 class="serif mt-4 text-4xl font-semibold">Model + Newsroom language cues</h1>
-        <p class="mt-4 text-slate-600">
-          This application uses a BERT classifier trained on the Kaggle Fake and True news dataset. It evaluates
-          language patterns to predict whether an article reads like verified reporting or misinformation.
-        </p>
-        <div class="mt-6 grid gap-4 text-sm text-slate-600 md:grid-cols-2">
-          <div class="rounded-2xl border border-slate-200 bg-white/70 p-4">
-            <p class="font-semibold text-slate-800">Signal features</p>
-            <p class="mt-2">Headlines, tone, and source patterns are encoded by the transformer layers.</p>
+  <main class="mx-auto grid max-w-6xl gap-8 px-6 pb-16 pt-10">
+    <section class="hero-panel panel rounded-[2rem] p-8 md:p-10">
+      <div class="relative z-10 grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
+        <div>
+          <p class="text-xs uppercase tracking-[0.32em] text-slate-500">About The Project</p>
+          <h1 class="serif mt-4 max-w-3xl text-4xl font-semibold leading-tight text-slate-900 md:text-5xl">
+            Fake News Detector built for clear analysis, practical use, and readable results
+          </h1>
+          <p class="mt-5 max-w-2xl text-base leading-8 text-slate-600">
+            Yeh project news content ko analyze karke estimate karta hai ki article verified reporting jaisa lag raha hai
+            ya misleading patterns follow kar raha hai. System BERT-based language understanding, structured preprocessing,
+            aur readable confidence output ko combine karta hai taake user ko fast aur useful result mil sake.
+          </p>
+          <div class="mt-6 flex flex-wrap gap-3 text-sm text-slate-700">
+            <span class="accent-chip"><span class="accent-dot"></span>BERT-based classification</span>
+            <span class="accent-chip"><span class="accent-dot"></span>URL + text input support</span>
+            <span class="accent-chip"><span class="accent-dot"></span>Confidence-driven result flow</span>
           </div>
-          <div class="rounded-2xl border border-slate-200 bg-white/70 p-4">
-            <p class="font-semibold text-slate-800">Decision layer</p>
-            <p class="mt-2">A lightweight classifier head converts embeddings into a binary prediction.</p>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+          <div class="metric-tile rounded-3xl p-5">
+            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">Core Goal</p>
+            <p class="mt-3 text-lg font-semibold text-slate-900">Identify whether a news story feels real or fake.</p>
+          </div>
+          <div class="metric-tile rounded-3xl p-5">
+            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">Main Stack</p>
+            <p class="mt-3 text-lg font-semibold text-slate-900">Django frontend-backend flow with a BERT classifier.</p>
+          </div>
+          <div class="metric-tile rounded-3xl p-5">
+            <p class="text-xs uppercase tracking-[0.24em] text-slate-500">Output Style</p>
+            <p class="mt-3 text-lg font-semibold text-slate-900">Prediction, confidence, article preview, and reasoning.</p>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section class="grid gap-6 md:grid-cols-3">
-        <div class="panel rounded-3xl p-6">
-          <h3 class="text-lg font-semibold">Training data</h3>
-          <p class="mt-3 text-sm text-slate-600">Kaggle Fake.csv and True.csv with labeled headlines and text.</p>
-        </div>
-        <div class="panel rounded-3xl p-6">
-          <h3 class="text-lg font-semibold">Inference</h3>
-          <p class="mt-3 text-sm text-slate-600">Text is tokenized, padded, and fed to the fine-tuned BERT model.</p>
-        </div>
-        <div class="panel rounded-3xl p-6">
-          <h3 class="text-lg font-semibold">Confidence</h3>
-          <p class="mt-3 text-sm text-slate-600">Scores show the model's probability for the predicted class.</p>
-        </div>
-      </section>
-
-      <section class="panel rounded-3xl p-8">
-        <h2 class="text-2xl font-semibold">Tips for best results</h2>
-        <ul class="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
-          <li>Paste full paragraphs, not just a headline.</li>
-          <li>Include the original article body when possible.</li>
-          <li>Use the URL option to auto-extract text.</li>
-          <li>Compare multiple sources for verification.</li>
-        </ul>
-      </section>
-
-      <section class="panel rounded-3xl p-8">
-        <h2 class="text-2xl font-semibold">Responsible use</h2>
-        <p class="mt-4 text-sm text-slate-600">
-          Predictions are probabilistic. For high impact stories, corroborate with multiple credible sources and
-          verify the publisher before sharing.
+    <section class="grid gap-8 lg:grid-cols-[1.12fr_0.88fr]">
+      <div class="panel rounded-[2rem] p-8">
+        <p class="text-xs uppercase tracking-[0.32em] text-slate-500">How It Works</p>
+        <h2 class="mt-4 text-3xl font-semibold text-slate-900">Detection workflow</h2>
+        <p class="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
+          About page ka purpose sirf model introduce karna nahi hai, balki user ko samjhana bhi hai ke result generate
+          kaise hota hai. Neeche complete flow diya gaya hai.
         </p>
-      </section>
-    </main>
+        <div class="mt-8 grid gap-4 md:grid-cols-2">
+          <div class="step-card rounded-3xl p-5">
+            <span class="step-number">01</span>
+            <h3 class="mt-4 text-lg font-semibold text-slate-900">Input collection</h3>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              User article text paste karta hai ya direct URL deta hai. System readable content ko capture karne ki
+              koshish karta hai.
+            </p>
+          </div>
+          <div class="step-card rounded-3xl p-5">
+            <span class="step-number">02</span>
+            <h3 class="mt-4 text-lg font-semibold text-slate-900">Text preparation</h3>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              News content clean hota hai, unnecessary fragments remove hote hain, aur model-ready text structure banaya jata hai.
+            </p>
+          </div>
+          <div class="step-card rounded-3xl p-5">
+            <span class="step-number">03</span>
+            <h3 class="mt-4 text-lg font-semibold text-slate-900">Model inference</h3>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              BERT classifier language cues, tone, structure, aur wording intensity ko evaluate karke prediction banata hai.
+            </p>
+          </div>
+          <div class="step-card rounded-3xl p-5">
+            <span class="step-number">04</span>
+            <h3 class="mt-4 text-lg font-semibold text-slate-900">Readable output</h3>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              Final result page confidence, article preview, aur analysis insights ke saath clear human-readable format me show hota hai.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel rounded-[2rem] p-8">
+        <p class="text-xs uppercase tracking-[0.32em] text-slate-500">Team Contributions</p>
+        <h2 class="mt-4 text-3xl font-semibold text-slate-900">Project roles</h2>
+        <p class="mt-4 text-sm leading-7 text-slate-600">
+          Team structure ko yahan clearly mention kiya gaya hai taake project responsibility aur implementation areas samajh aayein.
+        </p>
+        <div class="mt-6 space-y-4">
+          <div class="team-card rounded-3xl p-5">
+            <p class="text-lg font-semibold text-slate-900">Ayush</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              Ayush ne backend ka kaam kiya hai, including API flow, server-side prediction logic, request handling,
+              response formatting, aur system integration.
+            </p>
+          </div>
+          <div class="team-card rounded-3xl p-5">
+            <p class="text-lg font-semibold text-slate-900">Anshu</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              Anshu ne frontend ka kaam kiya hai, including page layouts, UI styling, result presentation, navigation,
+              aur user interaction experience.
+            </p>
+          </div>
+          <div class="team-card rounded-3xl p-5">
+            <p class="text-lg font-semibold text-slate-900">Neo</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">
+              Neo ne datamodel par kaam kiya hai, including prediction record structure, data storage planning,
+              field organization, aur result persistence flow.
+            </p>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="grid gap-6 md:grid-cols-3">
+      <div class="panel rounded-[2rem] p-7">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-500">Training Data</p>
+        <h3 class="mt-4 text-2xl font-semibold text-slate-900">Dataset foundation</h3>
+        <p class="mt-4 text-sm leading-7 text-slate-600">
+          Model training ke liye Kaggle ke `Fake.csv` aur `True.csv` datasets use kiye gaye, jisme labeled news headlines
+          aur article text available hai.
+        </p>
+      </div>
+      <div class="panel rounded-[2rem] p-7">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-500">Model Focus</p>
+        <h3 class="mt-4 text-2xl font-semibold text-slate-900">Language pattern reading</h3>
+        <p class="mt-4 text-sm leading-7 text-slate-600">
+          System sensational wording, consistency, phrasing style, aur reporting-like structure ko evaluate karke
+          signal-based understanding develop karta hai.
+        </p>
+      </div>
+      <div class="panel rounded-[2rem] p-7">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-500">Result Logic</p>
+        <h3 class="mt-4 text-2xl font-semibold text-slate-900">Confidence-driven output</h3>
+        <p class="mt-4 text-sm leading-7 text-slate-600">
+          Final page me sirf label nahi dikhaya jata, balki confidence score aur supporting analysis details bhi show ki jati hain.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel rounded-[2rem] p-8">
+      <div class="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+        <div>
+          <p class="text-xs uppercase tracking-[0.32em] text-slate-500">What The System Looks For</p>
+          <h2 class="mt-4 text-3xl font-semibold text-slate-900">Signals used in analysis</h2>
+          <p class="mt-4 text-sm leading-7 text-slate-600">
+            Prediction sirf ek headline dekh kar nahi hoti. Detector multiple textual indicators ko combine karta hai.
+          </p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="info-strip rounded-3xl p-5">
+            <p class="font-semibold text-slate-900">Headline tone</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">System dekhta hai ke headline neutral reporting jaisi hai ya exaggerated attention-grabbing style me likhi gayi hai.</p>
+          </div>
+          <div class="info-strip rounded-3xl p-5">
+            <p class="font-semibold text-slate-900">Article structure</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">Content flow, sentence quality, aur detail consistency ko evaluate kiya jata hai taake article coherence samajh aaye.</p>
+          </div>
+          <div class="info-strip rounded-3xl p-5">
+            <p class="font-semibold text-slate-900">Language intensity</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">Overdramatic phrases, repetitive emphasis, aur suspicious wording detector ke liye important signals hote hain.</p>
+          </div>
+          <div class="info-strip rounded-3xl p-5">
+            <p class="font-semibold text-slate-900">Confidence response</p>
+            <p class="mt-2 text-sm leading-7 text-slate-600">Prediction ke saath confidence diya jata hai taake user samajh sake ke detector result kitni strength ke saath de raha hai.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid gap-6 lg:grid-cols-2">
+      <div class="panel rounded-[2rem] p-8">
+        <p class="text-xs uppercase tracking-[0.32em] text-slate-500">Best Use</p>
+        <h2 class="mt-4 text-3xl font-semibold text-slate-900">Tips for better results</h2>
+        <div class="mt-6 space-y-4 text-sm leading-7 text-slate-600">
+          <div class="rounded-3xl border border-slate-200 bg-white/70 p-4">
+            Full paragraph ya full article body dene se model ko zyada context milta hai, isliye result better hota hai.
+          </div>
+          <div class="rounded-3xl border border-slate-200 bg-white/70 p-4">
+            URL extraction use karte waqt original article link dena best hai, social share redirects se bachna chahiye.
+          </div>
+          <div class="rounded-3xl border border-slate-200 bg-white/70 p-4">
+            Final decision lene se pehle multiple trusted sources se verify karna still recommended hai.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel rounded-[2rem] p-8">
+        <p class="text-xs uppercase tracking-[0.32em] text-slate-500">Responsible Use</p>
+        <h2 class="mt-4 text-3xl font-semibold text-slate-900">Use this as decision support</h2>
+        <div class="mt-6 space-y-4 text-sm leading-7 text-slate-600">
+          <div class="rounded-3xl border border-slate-200 bg-white/70 p-4">
+            Predictions probabilistic hoti hain. System helpful indicator hai, lekin final truth checker replacement nahi hai.
+          </div>
+          <div class="rounded-3xl border border-slate-200 bg-white/70 p-4">
+            Political, medical, legal, ya sensitive stories ke case me manual verification aur source cross-check zaroor karein.
+          </div>
+          <div class="rounded-3xl border border-slate-200 bg-white/70 p-4">
+            Low confidence cases me article ko dubara analyze karna ya full content provide karna better practice hoti hai.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 {% endblock %}

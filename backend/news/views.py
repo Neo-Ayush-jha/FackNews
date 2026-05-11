@@ -111,9 +111,13 @@ def predict_news(request):
 
                 text = extract_text_from_url(url)
             except Exception as exc:
+                error_msg = str(exc)
+                # Provide helpful suggestions
+                if "blocked" in error_msg.lower() or "fetch" in error_msg.lower():
+                    error_msg += " You can try: 1) Copy and paste the article text directly, 2) Try a mobile version of the URL, 3) Check if the URL is correct"
                 # Allow manual pasted text to continue if URL extraction is blocked.
                 if not text:
-                    return Response({"error": f"Could not extract article text: {str(exc)}"}, status=400)
+                    return Response({"error": f"Could not extract article text: {error_msg}"}, status=400)
         else:
             text = f"{text}\n\n{url}".strip()
 
@@ -186,3 +190,36 @@ def prediction_history(request):
     predictions = Prediction.objects.filter(user=request.user).order_by("-created_at")
     serializer = PredictionSerializer(predictions, many=True)
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+def search_news_api(request):
+    """
+    API endpoint to search news from multiple sources.
+    
+    Query parameters:
+        query: Search query (required)
+        source: News source - 'all', 'timesofindia', 'ndtv', 'hindustantimes', 'bbc', 'reuters', etc.
+        limit: Number of results (default: 5, max: 20)
+    """
+    query = request.GET.get("query", "").strip()
+    source = request.GET.get("source", "all").strip().lower()
+    limit = min(int(request.GET.get("limit", 5)), 20)
+    
+    if not query:
+        return Response({"error": "Search query is required"}, status=400)
+    
+    if len(query) > 200:
+        return Response({"error": "Search query is too long"}, status=400)
+    
+    try:
+        from .utils import search_news
+        results = search_news(query, source=source, limit=limit)
+        return Response({
+            "query": query,
+            "source": source,
+            "count": len(results),
+            "results": results
+        })
+    except Exception as exc:
+        return Response({"error": f"News search failed: {str(exc)}"}, status=500)
