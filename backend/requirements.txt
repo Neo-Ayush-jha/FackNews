@@ -31,3 +31,4 @@ trafilatura==2.0.0
 lxml==6.0.2
 lxml_html_clean==0.4.4
 newspaper3k==0.2.8
+feedparser==6.0.11
