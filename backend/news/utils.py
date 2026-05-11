@@ -1,4 +1,5 @@
 from pathlib import Path
+from html import unescape as html_unescape
 import json
 import os
 import re
@@ -19,6 +20,13 @@ ARTICLE_REQUEST_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.google.com/",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+    "Sec-Fetch-Dest": "document",
 }
 
 DIVERSE_USER_AGENTS = [
@@ -45,6 +53,11 @@ DIVERSE_USER_AGENTS = [
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) "
         "Gecko/20100101 Firefox/124.0"
+    ),
+    (
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Mobile Safari/537.36"
     ),
 ]
 
@@ -231,7 +244,10 @@ def _get_diverse_headers():
 
 
 def _clean_text(value):
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    text = str(value or "")
+    for _ in range(2):
+        text = html_unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _clean_html_fragment(value):
@@ -622,6 +638,92 @@ def _parse_html_search_results(html, base_url, default_source):
         })
 
     return parsed_results
+
+
+def _normalize_match_text(value):
+    return re.sub(r"[^a-z0-9]+", " ", _clean_text(value).lower()).strip()
+
+
+def _pick_best_search_result(article_url, query, results):
+    if not results:
+        return {}
+
+    source_domain = _extract_domain(guess_search_site_from_url(article_url))
+    query_terms = set(_normalize_match_text(query).split())
+    best_result = {}
+    best_score = -1
+
+    for result in results:
+        title = _clean_text(result.get("title"))
+        summary = _clean_html_fragment(result.get("summary"))
+        published = _clean_text(result.get("published"))
+        link = _clean_text(result.get("link"))
+        title_terms = set(_normalize_match_text(title).split())
+        summary_terms = set(_normalize_match_text(summary).split())
+        link_domain = _extract_domain(link)
+
+        score = 0
+        score += len(title_terms & query_terms) * 5
+        score += len(summary_terms & query_terms) * 2
+        if source_domain and source_domain in link_domain:
+            score += 6
+        if summary and _normalize_match_text(summary) != _normalize_match_text(title):
+            score += 3
+        if published:
+            score += 1
+
+        if score > best_score:
+            best_score = score
+            best_result = result
+
+    return best_result
+
+
+def _build_search_result_fallback_text(url):
+    query = guess_search_query_from_url(url)
+    if not query:
+        return ""
+
+    source_guess = guess_search_site_from_url(url)
+    source_key, _ = _resolve_search_source(source_guess)
+    candidate_sources = []
+    for candidate in (source_key, "all", "bing_news", "google_news"):
+        if candidate and candidate not in candidate_sources:
+            candidate_sources.append(candidate)
+
+    collected_results = []
+    for candidate in candidate_sources:
+        try:
+            results = search_news(query, source=candidate, limit=8)
+        except Exception:
+            continue
+        if results:
+            collected_results.extend(results)
+
+    best_result = _pick_best_search_result(url, query, collected_results)
+    if not best_result:
+        return ""
+
+    title = _clean_text(best_result.get("title"))
+    summary = _clean_html_fragment(best_result.get("summary"))
+    published = _clean_text(best_result.get("published"))
+    source = _clean_text(best_result.get("source"))
+
+    parts = []
+    if title:
+        parts.append(title)
+    if summary and _normalize_match_text(summary) != _normalize_match_text(title):
+        parts.append(summary)
+    if source:
+        parts.append(f"The report is listed under {source}.")
+    if published:
+        parts.append(f"Published: {published}.")
+
+    fallback_text = _clean_text(" ".join(parts))
+    if len(fallback_text) < 100:
+        fallback_text = _clean_text(f"{fallback_text} The article concerns {query}.")
+
+    return fallback_text if len(fallback_text) >= 100 else ""
 
 
 # def _fake_signal_score(text):
@@ -1500,6 +1602,11 @@ def extract_text_from_url(url):
         if archive_html:
             html = archive_html
 
+    if not html or _looks_like_blocked_html(html):
+        search_fallback_text = _build_search_result_fallback_text(url)
+        if search_fallback_text:
+            return search_fallback_text
+
     if not html:
         raise ValueError("The news site blocked automated access or the page could not be fetched.")
 
@@ -1644,6 +1751,10 @@ def extract_text_from_url(url):
     final_text = "\n\n".join(texts).strip()
     if final_text and len(final_text) >= 100:
         return final_text
+
+    search_fallback_text = _build_search_result_fallback_text(url)
+    if search_fallback_text:
+        return search_fallback_text
 
     raise ValueError("Content not extractable from this site. The page might be blocked, require authentication, or have no readable text.")
 

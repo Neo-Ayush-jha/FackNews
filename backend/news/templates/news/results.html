@@ -16,10 +16,12 @@
   .gauge-card{display:flex;flex-direction:column;align-items:center;gap:8px}
   .history-table{width:100%;border-collapse:collapse}
   .history-table td,.history-table th{padding:8px;border-bottom:1px solid rgba(15,23,42,0.06);text-align:left}
+  .score-track{height:10px;border-radius:9999px;background:rgba(148,163,184,0.18);overflow:hidden}
+  .score-fill{display:block;height:100%;border-radius:9999px}
 {% endblock %}
 
 {% block content %}
-    <main class="mx-auto grid max-w-5xl gap-8 px-6 pb-16 pt-10">
+    <main class="mx-auto grid max-w-6xl gap-8 px-6 pb-16 pt-10">
       <section class="card rounded-3xl p-8">
         <p class="text-xs uppercase tracking-[0.3em] text-slate-500">Result</p>
         <h1 class="serif mt-4 text-4xl font-semibold">Final Detection Result</h1>
@@ -42,19 +44,7 @@
         </div>
       </section>
 
-      <section class="card rounded-3xl p-8">
-        <h2 class="text-xl font-semibold">Interpretation</h2>
-        <div class="mt-4 grid gap-4 text-sm text-slate-600 md:grid-cols-2">
-          <div class="rounded-2xl border border-slate-200 bg-white/70 p-4">
-            <p class="font-semibold text-slate-800">Real News</p>
-            <p class="mt-2">The model recognizes language that matches verified reporting patterns.</p>
-          </div>
-          <div class="rounded-2xl border border-slate-200 bg-white/70 p-4">
-            <p class="font-semibold text-slate-800">Fake News</p>
-            <p class="mt-2">The model found signals typical of misleading or fabricated content.</p>
-          </div>
-        </div>
-      </section>
+     
 
       <section class="card rounded-3xl p-8">
         <div class="flex items-center justify-between gap-3">
@@ -84,6 +74,7 @@
         const historyList = document.getElementById("historyList");
         const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
         const DISPLAY_MODEL_NAME = "BERT Fake News Detector";
+        const STORAGE_KEY = "latestPrediction";
         let historyItems = [];
 
         const toNumber = (value, fallback = 0) => {
@@ -91,14 +82,58 @@
           return Number.isFinite(n) ? n : fallback;
         };
 
+        const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, toNumber(value, min)));
+
+        const escapeHtml = (value) => String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+        const countWords = (text) => (text || "").trim().split(/\s+/).filter(Boolean).length;
+
+        const countSentences = (text) => {
+          const matches = (text || "").match(/[^.!?]+[.!?]+|[^.!?]+$/g);
+          return matches ? matches.length : 0;
+        };
+
+        const getLatestLocalPrediction = () => {
+          const cached = localStorage.getItem(STORAGE_KEY);
+          if (!cached) {
+            return null;
+          }
+          try {
+            return JSON.parse(cached);
+          } catch (err) {
+            localStorage.removeItem(STORAGE_KEY);
+            return null;
+          }
+        };
+
         const normalizePrediction = (item) => {
+          const verification = item?.verification_result || {};
+          const prediction = item.prediction || item.result || "Unknown";
+          const confidence = clamp(item.confidence, 0, 100);
+          const primaryPrediction = item.primary_prediction || verification.primary_prediction || prediction;
+          const primaryConfidence = clamp(item.primary_confidence ?? verification.primary_confidence, 0, 100);
+          const fallbackFakeConfidence = primaryPrediction === "Fake News" ? primaryConfidence : 100 - primaryConfidence;
+          const fallbackRealConfidence = primaryPrediction === "Real News" ? primaryConfidence : 100 - primaryConfidence;
+
           return {
             id: item.id || null,
-            prediction: item.prediction || item.result || "Unknown",
-            confidence: toNumber(item.confidence, 0),
+            prediction,
+            confidence,
             text: item.text || "",
             created_at: item.created_at || new Date().toISOString(),
-            primary_model_status: item.primary_model_status || item?.verification_result?.primary_model_status || "ready",
+            decision_reason: item.decision_reason || verification.decision_reason || "The detector reviewed the article wording, phrasing style, and confidence signals to generate the final result.",
+            signal_score: toNumber(item.signal_score ?? verification.signal_score, -1),
+            primary_prediction: primaryPrediction,
+            primary_confidence: primaryConfidence,
+            primary_fake_confidence: clamp(item.primary_fake_confidence ?? verification.primary_fake_confidence, 0, 100) || clamp(fallbackFakeConfidence, 0, 100),
+            primary_real_confidence: clamp(item.primary_real_confidence ?? verification.primary_real_confidence, 0, 100) || clamp(fallbackRealConfidence, 0, 100),
+            primary_model_status: item.primary_model_status || verification.primary_model_status || "ready",
+            primary_model_note: item.primary_model_note || verification.primary_model_note || "",
           };
         };
 
@@ -111,6 +146,11 @@
             ? String(numericValue)
             : numericValue.toFixed(2).replace(/\.?0+$/, "");
           return `${normalized}%`;
+        };
+
+        const formatDateTime = (value) => {
+          const date = new Date(value || Date.now());
+          return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleString();
         };
 
         const getAnalysisStatus = (data) => {
@@ -137,52 +177,177 @@
           return "Lower confidence, so manual review is recommended.";
         };
 
+        const getSignalSummary = (score) => {
+          if (score < 0) {
+            return "Signal score not available for this result.";
+          }
+          if (score >= 7) {
+            return "High suspicious language signals detected.";
+          }
+          if (score >= 4) {
+            return "Moderate suspicious language signals detected.";
+          }
+          return "Low suspicious language signals detected.";
+        };
+
+        const getPredictionTone = (label) => label === "Real News"
+          ? "bg-emerald-100 text-emerald-700"
+          : "bg-rose-100 text-rose-700";
+
+        const renderScoreBar = (label, value, color) => `
+          <div>
+            <div class="mb-2 flex items-center justify-between text-sm text-slate-600">
+              <span>${label}</span>
+              <span>${formatPercent(value)}</span>
+            </div>
+            <div class="score-track">
+              <span class="score-fill" style="width:${clamp(value)}%; background:${color};"></span>
+            </div>
+          </div>
+        `;
+
+        const renderHistoryCards = (items, localOnly = false) => {
+          if (!Array.isArray(items) || items.length === 0) {
+            historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
+            return;
+          }
+
+          historyList.innerHTML = items.slice(0, 6).map((item, index) => {
+            const row = normalizePrediction(item);
+            const title = escapeHtml((row.text || "").split("\n")[0].slice(0, 90) || "Untitled article");
+            const meta = localOnly ? "Latest local result" : formatDateTime(row.created_at);
+            return `
+              <button
+                type="button"
+                data-index="${index}"
+                class="history-item w-full rounded-2xl border border-slate-200 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-white"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${getPredictionTone(row.prediction)}">
+                    ${escapeHtml(row.prediction)}
+                  </span>
+                  <span class="text-xs text-slate-500">${escapeHtml(meta)}</span>
+                </div>
+                <p class="mt-3 text-sm font-semibold text-slate-800">${title}</p>
+                <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <span>${DISPLAY_MODEL_NAME}</span>
+                  <span>${formatPercent(row.confidence)} confidence</span>
+                </div>
+              </button>
+            `;
+          }).join("");
+
+          historyList.querySelectorAll(".history-item").forEach((button) => {
+            button.addEventListener("click", () => {
+              const idx = Number(button.getAttribute("data-index"));
+              render(items[idx]);
+              resultEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+          });
+        };
+
         const render = (raw) => {
           const data = raw ? normalizePrediction(raw) : null;
           if (!data) {
             resultEl.innerHTML = '<p class="text-sm text-slate-500">No prediction stored yet.</p>';
             return;
           }
+
+          const safeTitle = escapeHtml((data.text || "").split("\n")[0].slice(0, 120) || "Untitled article");
+          const safePreview = escapeHtml((data.text || "").slice(0, 320)).replace(/\n/g, "<br>");
+          const safeReason = escapeHtml(data.decision_reason || "No decision reason available.");
+          const safeModelNote = escapeHtml(data.primary_model_note || "");
+          const wordCount = countWords(data.text);
+          const sentenceCount = countSentences(data.text);
+          const characterCount = (data.text || "").length;
           const angle = Math.max(0, Math.min(180, Math.round((Number(data.confidence) || 0) * 1.8)));
+
           resultEl.innerHTML = `
-            <div class="flex flex-col md:flex-row gap-6">
+            <div class="grid gap-6 lg:grid-cols-[260px_1fr]">
               <div class="rounded-xl border border-slate-200 bg-white p-6 flex-shrink-0 gauge-card">
                 <div class="gauge-wrap">
                   <div class="gauge" style="background: conic-gradient(#10b981 ${angle}deg, #ef4444 ${angle}deg);"></div>
                   <div class="gauge-center">
                     <div class="percent">${formatPercent(data.confidence)}</div>
-                    <div class="text-xs text-slate-500">${data.prediction === 'Real News' ? 'REAL' : 'FAKE'}</div>
+                    <div class="text-xs text-slate-500">${data.prediction === "Real News" ? "REAL" : "FAKE"}</div>
                   </div>
                 </div>
                 <div class="mt-2 text-xs text-slate-400">Model confidence</div>
+                <div class="mt-4 w-full rounded-2xl bg-slate-50 p-4 text-left">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Summary</p>
+                  <p class="mt-2 text-sm font-semibold text-slate-900">${escapeHtml(data.prediction)}</p>
+                  <p class="mt-1 text-sm text-slate-600">${getConfidenceMessage(data.confidence)}</p>
+                </div>
               </div>
 
-              <div class="flex-1 grid gap-4">
-                <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <div class="grid gap-4 md:grid-cols-2">
+                <div class="rounded-xl border border-slate-200 bg-white p-4 md:col-span-2">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Final Result</p>
                   <div class="mt-3 flex flex-wrap items-center gap-3">
-                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${data.prediction === 'Real News' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
-                      ${data.prediction}
+                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${getPredictionTone(data.prediction)}">
+                      ${escapeHtml(data.prediction)}
                     </span>
                     <span class="text-sm text-slate-600">${getConfidenceMessage(data.confidence)}</span>
                   </div>
                   <p class="mt-3 text-sm text-slate-600">${getResultSummary(data)}</p>
                 </div>
+
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analyzed Article Preview</p>
-                  <h3 class="mt-2 font-semibold text-slate-800">${(data.text || '').split('\n')[0].slice(0,120) || 'Untitled'}</h3>
-                  <p class="mt-2 text-sm text-slate-600 whitespace-pre-line">${(data.text || '').slice(0,220)}</p>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Why This Result</p>
+                  <p class="mt-3 text-sm leading-7 text-slate-600">${safeReason}</p>
+                  ${safeModelNote ? `<p class="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-700">${safeModelNote}</p>` : ""}
                 </div>
+
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Confidence Breakdown</p>
+                  <div class="mt-3 space-y-4">
+                    ${renderScoreBar("Real News likelihood", data.primary_real_confidence, "#10b981")}
+                    ${renderScoreBar("Fake News likelihood", data.primary_fake_confidence, "#ef4444")}
+                    ${renderScoreBar("Final decision confidence", data.confidence, "#111827")}
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-white p-4 md:col-span-2">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analyzed Article Preview</p>
+                  <h3 class="mt-2 font-semibold text-slate-800">${safeTitle}</h3>
+                  <p class="mt-2 text-sm text-slate-600 whitespace-pre-line">${safePreview}</p>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Article Insights</p>
+                  <div class="mt-2 grid grid-cols-2 gap-3 text-sm text-slate-700">
+                    <div class="rounded-2xl bg-slate-50 p-3">
+                      <p class="text-xs uppercase tracking-wide text-slate-500">Words</p>
+                      <p class="mt-1 font-semibold text-slate-900">${wordCount}</p>
+                    </div>
+                    <div class="rounded-2xl bg-slate-50 p-3">
+                      <p class="text-xs uppercase tracking-wide text-slate-500">Sentences</p>
+                      <p class="mt-1 font-semibold text-slate-900">${sentenceCount}</p>
+                    </div>
+                    <div class="rounded-2xl bg-slate-50 p-3">
+                      <p class="text-xs uppercase tracking-wide text-slate-500">Characters</p>
+                      <p class="mt-1 font-semibold text-slate-900">${characterCount}</p>
+                    </div>
+                    <div class="rounded-2xl bg-slate-50 p-3">
+                      <p class="text-xs uppercase tracking-wide text-slate-500">Signal Score</p>
+                      <p class="mt-1 font-semibold text-slate-900">${data.signal_score >= 0 ? data.signal_score : "N/A"}</p>
+                    </div>
+                  </div>
+                  <p class="mt-3 text-xs text-slate-500">${getSignalSummary(data.signal_score)}</p>
+                </div>
+
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Model Output</p>
-                  <div class="mt-2 text-sm text-slate-700 grid grid-cols-2 gap-2">
+                  <div class="mt-2 grid grid-cols-2 gap-2 text-sm text-slate-700">
                     <div>Model Name:</div><div>${DISPLAY_MODEL_NAME}</div>
-                    <div>Final Prediction:</div><div>${data.prediction}</div>
+                    <div>Final Prediction:</div><div>${escapeHtml(data.prediction)}</div>
+                    <div>Primary Detector Output:</div><div>${escapeHtml(data.primary_prediction)}</div>
+                    <div>Primary Confidence:</div><div>${formatPercent(data.primary_confidence)}</div>
                     <div>Confidence Score:</div><div>${formatPercent(data.confidence)}</div>
                     <div>Analysis Status:</div><div>${getAnalysisStatus(data)}</div>
-                    <div>Checked On:</div><div>${new Date(data.created_at || Date.now()).toLocaleString()}</div>
+                    <div>Checked On:</div><div>${formatDateTime(data.created_at)}</div>
                   </div>
-                  ${data.primary_model_status === 'model_warming' ? '<p class="mt-3 text-xs text-amber-600">Quick analysis mode was used while the full detector finishes initializing.</p>' : ''}
+                  ${data.primary_model_status === "model_warming" ? '<p class="mt-3 text-xs text-amber-600">Quick analysis mode was used while the full detector finishes initializing.</p>' : ""}
                 </div>
               </div>
             </div>
@@ -206,43 +371,56 @@
             </div>
           `;
 
-          // Always populate history table from DB-fetched history list.
-          const historyBody = document.getElementById('historyTableBody');
+          const historyBody = document.getElementById("historyTableBody");
           if (historyBody) {
             if (!Array.isArray(historyItems) || historyItems.length === 0) {
-              historyBody.innerHTML = '';
+              historyBody.innerHTML = "";
               return;
             }
 
-            historyBody.innerHTML = historyItems.slice(0,10).map((h, index)=>{
-              const row = normalizePrediction(h);
-              const d = new Date(h.created_at || Date.now()).toLocaleDateString();
-              const title = (h.title || (h.text||'')).split('\n')[0].slice(0, 60);
-              const model = DISPLAY_MODEL_NAME;
-              const label = row.prediction || 'N/A';
-              const conf = formatPercent(row.confidence);
-              return `<tr data-index="${index}" class="history-row cursor-pointer hover:bg-slate-50"><td>${d}</td><td>${title}</td><td>${model}</td><td>${label}</td><td>${conf}</td></tr>`;
-            }).join('');
+            historyBody.innerHTML = historyItems.slice(0, 10).map((item, index) => {
+              const row = normalizePrediction(item);
+              const title = escapeHtml((row.text || "").split("\n")[0].slice(0, 60) || "Untitled article");
+              return `
+                <tr data-index="${index}" class="history-row cursor-pointer hover:bg-slate-50">
+                  <td>${formatDateTime(row.created_at)}</td>
+                  <td>${title}</td>
+                  <td>${DISPLAY_MODEL_NAME}</td>
+                  <td>${escapeHtml(row.prediction)}</td>
+                  <td>${formatPercent(row.confidence)}</td>
+                </tr>
+              `;
+            }).join("");
 
-            historyBody.querySelectorAll('.history-row').forEach((tr) => {
-              tr.addEventListener('click', () => {
-                const idx = Number(tr.getAttribute('data-index'));
+            historyBody.querySelectorAll(".history-row").forEach((row) => {
+              row.addEventListener("click", () => {
+                const idx = Number(row.getAttribute("data-index"));
                 render(historyItems[idx]);
-                resultEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                resultEl.scrollIntoView({ behavior: "smooth", block: "center" });
               });
             });
           }
         };
 
         const renderHistory = (items) => {
+          const cached = getLatestLocalPrediction();
+
           if (!Array.isArray(items) || items.length === 0) {
+            if (cached) {
+              historyItems = [cached];
+              renderHistoryCards(historyItems, true);
+              render(cached);
+              return;
+            }
+
             historyItems = [];
-            historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
+            renderHistoryCards([]);
             render(null);
             return;
           }
+
           historyItems = items;
-          historyList.innerHTML = '';
+          renderHistoryCards(items);
           render(items[0]);
         };
 
@@ -256,16 +434,27 @@
             }
             renderHistory(data);
           } catch (err) {
+            const cached = getLatestLocalPrediction();
+            if (cached) {
+              historyItems = [cached];
+              renderHistoryCards(historyItems, true);
+              render(cached);
+              return;
+            }
             historyList.innerHTML = '<p class="text-sm text-rose-600">History load nahi ho payi. Refresh karke try karo.</p>';
           }
         };
 
-        render(null);
+        const cached = getLatestLocalPrediction();
+        if (cached) {
+          render(cached);
+        } else {
+          render(null);
+        }
 
         clearBtn.addEventListener("click", () => {
-          historyItems = [];
-          historyList.innerHTML = '<p class="text-sm text-slate-500">Abhi tak koi saved news check nahi mili.</p>';
-          render(null);
+          localStorage.removeItem(STORAGE_KEY);
+          fetchHistory();
         });
 
         refreshHistoryBtn.addEventListener("click", fetchHistory);
