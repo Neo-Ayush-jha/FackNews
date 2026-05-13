@@ -1,16 +1,22 @@
 # serializers.py Viva Questions
 
-## 1. PredictionSerializer ka role kya hai?
-Answer: Prediction model ko JSON response me convert karna.
+## 1. PredictionSerializer kya karta hai?
+Answer: Prediction model ko JSON me convert karta hai.
 
-## 2. ModelSerializer kyun use hota hai?
-Answer: Django model se serializer banana easy ho jata hai.
+## 2. ModelSerializer kyun use hua hai?
+Answer: Serializer banana easy ho jata hai.
 
-## 3. fields = '__all__' ka kya matlab hai?
-Answer: Model ke saare fields API me include honge.
+## 3. fields = '__all__' ka matlab kya hai?
+Answer: Saare model fields include honge.
 
-## 4. Is serializer me custom validation hai ya nahi?
-Answer: Isme custom validation nahi hai, simple model serialization hai.
+## 4. Custom validation hai ya nahi?
+Answer: Nahi, simple serializer hai.
 
-## 5. Serializer history endpoint me kaise use hota hai?
-Answer: User ki stored predictions ko response me bhejne ke liye.
+## 5. History API me serializer ka use kya hai?
+Answer: Saved predictions return karne ke liye.
+
+## 6. Is serializer ka frontend se relation kya hai?
+Answer: Frontend ko clean JSON milta hai.
+
+## 7. Future me extra field add kaise hoga?
+Answer: Custom field ya SerializerMethodField se.

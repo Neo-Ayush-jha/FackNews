@@ -1,34 +1,31 @@
 # utils.py Viva Questions
 
-## 1. utils.py ka main kaam kya hai?
-Answer: Model loading, text analysis, URL extraction, aur news search helpers provide karna.
+## 1. utils.py ka kaam kya hai?
+Answer: Model loading aur text processing.
 
-## 2. analyze_text function kya karta hai?
-Answer: Input text ko analyze karke final prediction aur confidence nikalta hai.
+## 2. analyze_text kya karta hai?
+Answer: Final prediction nikalta hai.
 
-## 3. extract_text_from_url function ka use kya hai?
-Answer: News article URL se readable text nikalna.
+## 3. extract_text_from_url ka use kya hai?
+Answer: URL se article text nikalna.
 
-## 4. search_news function kya karta hai?
-Answer: Multiple sources se news search results laata hai.
+## 4. search_news kya karta hai?
+Answer: News search results deta hai.
 
-## 5. load_model_background ka purpose kya hai?
-Answer: Model ko background me load karke startup time smooth banana.
+## 5. load_model_background kyun hai?
+Answer: Startup ko fast rakhne ke liye.
 
-## 6. utils.py me URL normalization kyun hoti hai?
-Answer: Invalid ya incomplete URLs ko usable form me convert karne ke liye.
+## 6. URL normalization kyun hoti hai?
+Answer: Valid URL banane ke liye.
 
-## 7. Article extraction me fallback logic kyun use hua hai?
-Answer: Agar ek method fail ho to dusra try kiya ja sake.
+## 7. Fallback chain ka idea kya hai?
+Answer: Ek method fail ho to dusra try karo.
 
-## 8. Browser profile rotation kyun rakhi gayi hai?
-Answer: Anti-bot blocking ko reduce karne ke liye.
+## 8. User agent rotation kyun use hoti hai?
+Answer: Blocking reduce karne ke liye.
 
-## 9. Diverse user agents ka use kya hai?
-Answer: Requests ko normal browser traffic jaisa dikhane ke liye.
+## 9. Archive.org fallback kis liye hai?
+Answer: Blocked page ka snapshot lene ke liye.
 
-## 10. Archive.org fallback kis liye hai?
-Answer: Jab live site block kare to snapshot se content lene ke liye.
-
-## 11. Search source aliases ka kya role hai?
-Answer: Ek source ko different short names se map karne ke liye.
+## 10. Search aliases ka role kya hai?
+Answer: Source names ko map karna.

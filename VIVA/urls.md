@@ -1,19 +1,22 @@
 # urls.py Viva Questions
 
 ## 1. urls.py ka role kya hai?
-Answer: Frontend page routes define karna.
+Answer: Page routes define karna.
 
-## 2. home route kaunsa hai?
-Answer: Root path `/`.
+## 2. Home route kaunsa hai?
+Answer: `/`
 
-## 3. results page ka route kya hai?
+## 3. Results route kya hai?
 Answer: `/results/`
 
-## 4. about page ka route kya hai?
+## 4. About route kya hai?
 Answer: `/about/`
 
-## 5. auth page ka route kya hai?
+## 5. Auth route kya hai?
 Answer: `/auth/`
 
-## 6. upload page ka route kya hai?
+## 6. Upload route kya hai?
 Answer: `/upload/`
+
+## 7. urlpatterns ka kaam kya hai?
+Answer: Routes list rakhna.

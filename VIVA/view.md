@@ -1,43 +1,37 @@
 # views.py Viva Questions
 
-## 1. views.py ka main role kya hai?
-Answer: User requests handle karna aur API responses return karna.
+## 1. views.py ka role kya hai?
+Answer: Requests handle karna aur response dena.
 
-## 2. home_page kya render karta hai?
-Answer: Home template, jahan prediction input form hota hai.
+## 2. home_page kya karta hai?
+Answer: Home template render karta hai.
 
-## 3. results_page ka purpose kya hai?
-Answer: Detailed prediction result dikhana.
+## 3. results_page ka use kya hai?
+Answer: Final result page dikhata hai.
 
-## 4. auth_page aur upload_page kya karte hain?
-Answer: Login/register aur dataset upload UI show karte hain.
+## 4. auth_page aur upload_page kya hain?
+Answer: Login aur dataset upload pages.
 
 ## 5. register_user kya karta hai?
-Answer: Naya user create karta hai.
+Answer: New account create karta hai.
 
-## 6. login_user ka function kya hai?
-Answer: Existing user ko authenticate karke login karna.
+## 6. login_user kya karta hai?
+Answer: User ko authenticate karke login karta hai.
 
 ## 7. logout_user kya karta hai?
-Answer: Current session logout karta hai.
+Answer: Session logout karta hai.
 
-## 8. auth_me endpoint kya return karta hai?
-Answer: User authenticated hai ya nahi, aur user details.
+## 8. auth_me kya return karta hai?
+Answer: Authentication status aur user info.
 
-## 9. predict_news ka role kya hai?
-Answer: Text ya URL leke fake/real prediction nikalna.
+## 9. predict_news ka kaam kya hai?
+Answer: Text ya URL se prediction nikalna.
 
-## 10. _looks_like_url function ka use kya hai?
-Answer: Input URL jaisa hai ya nahi, ye check karna.
+## 10. prediction_history ka use kya hai?
+Answer: User ki past predictions dikhana.
 
-## 11. URL extraction fail ho to kya hota hai?
-Answer: Helpful error message return hota hai.
+## 11. search_news_api kya karta hai?
+Answer: News search results return karta hai.
 
-## 12. Prediction database me kab save hoti hai?
-Answer: Jab user authenticated ho.
-
-## 13. prediction_history kya return karta hai?
-Answer: Logged-in user ki purani predictions.
-
-## 14. search_news_api ka use kya hai?
-Answer: Different news sources se search results dena.
+## 12. CSRF cookie kyun set hoti hai?
+Answer: Secure POST requests ke liye.

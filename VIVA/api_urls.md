@@ -1,25 +1,25 @@
 # api_urls.py Viva Questions
 
 ## 1. api_urls.py ka role kya hai?
-Answer: REST API endpoints define karna.
+Answer: API routes define karna.
 
 ## 2. predict endpoint kya karta hai?
-Answer: Text ya URL se fake news prediction deta hai.
+Answer: Fake/real prediction deta hai.
 
-## 3. history endpoint ka purpose kya hai?
-Answer: Logged-in user ki prediction history return karna.
+## 3. history endpoint ka use kya hai?
+Answer: Prediction history return karta hai.
 
-## 4. search endpoint ka use kya hai?
-Answer: Different news sources me query search karna.
+## 4. search endpoint kya karta hai?
+Answer: News search results laata hai.
 
-## 5. auth/register endpoint kya karta hai?
-Answer: New user registration.
+## 5. auth/register ka use kya hai?
+Answer: User registration.
 
-## 6. auth/login endpoint kya karta hai?
+## 6. auth/login ka use kya hai?
 Answer: User login.
 
-## 7. auth/logout endpoint kya karta hai?
+## 7. auth/logout ka use kya hai?
 Answer: User logout.
 
-## 8. auth/me endpoint kya verify karta hai?
-Answer: Current user authenticated hai ya nahi.
+## 8. auth/me kya verify karta hai?
+Answer: User logged in hai ya nahi.

@@ -1,31 +1,28 @@
 # home.html Viva Questions
 
-## 1. home page ka main purpose kya hai?
-Answer: User ko news text ya URL input dekar prediction start karne ka option dena.
+## 1. home page ka purpose kya hai?
+Answer: News check karna.
 
 ## 2. detectForm kya karta hai?
-Answer: Prediction request submit karta hai.
+Answer: Prediction submit karta hai.
 
-## 3. home page me do input options kyun diye gaye hain?
-Answer: Direct article text aur URL dono support karne ke liye.
+## 3. Text aur URL dono kyun hain?
+Answer: Flexible input ke liye.
 
-## 4. resultCard ka use kya hai?
-Answer: Latest prediction ka summary dikhana.
+## 4. resultCard kya dikhata hai?
+Answer: Latest result summary.
 
-## 5. history section kya show karta hai?
-Answer: User ki recent predictions.
+## 5. history section kya hai?
+Answer: Recent predictions list.
 
-## 6. clearBtn ka role kya hai?
-Answer: Input fields reset karna.
+## 6. clearBtn ka use kya hai?
+Answer: Fields reset karna.
 
-## 7. refreshHistory button kya karta hai?
-Answer: History dubara fetch karta hai.
+## 7. refreshHistory kya karta hai?
+Answer: History dubara load karta hai.
 
-## 8. localStorage ka use kyun hua hai?
-Answer: Last prediction ko page reload ke baad bhi dikhane ke liye.
+## 8. localStorage kyun use hua hai?
+Answer: Last result save karne ke liye.
 
-## 9. looksLikeUrl function ka use kya hai?
-Answer: User input ko URL ya text me classify karne ke liye.
-
-## 10. fetch to /api/predict/ kyun hota hai?
-Answer: Backend se final analysis lane ke liye.
+## 9. /api/predict/ kyun call hota hai?
+Answer: Backend prediction ke liye.
