@@ -103,13 +103,30 @@ def auth_me(request):
 def predict_news(request):
     text = (request.data.get("text") or "").strip()
     url = (request.data.get("url") or "").strip()
+    image = request.FILES.get("image")
+    input_source = "text"
+    image_name = ""
+    ocr_engine = ""
 
-    if url:
+    if image:
+        try:
+            from .utils import extract_text_from_image
+
+            ocr_result = extract_text_from_image(image)
+            text = (ocr_result.get("text") or "").strip()
+            input_source = "image"
+            image_name = ocr_result.get("image_name") or getattr(image, "name", "")
+            ocr_engine = ocr_result.get("engine") or "OCR"
+        except Exception as exc:
+            return Response({"error": f"Could not extract text from image: {str(exc)}"}, status=400)
+
+    elif url:
         if _looks_like_url(url):
             try:
                 from .utils import extract_text_from_url
 
                 text = extract_text_from_url(url)
+                input_source = "url"
             except Exception as exc:
                 error_msg = str(exc)
                 # Provide helpful suggestions
@@ -122,7 +139,7 @@ def predict_news(request):
             text = f"{text}\n\n{url}".strip()
 
     if not text:
-        return Response({"error": "No text provided"}, status=400)
+        return Response({"error": "No text, URL, or image provided"}, status=400)
 
     try:
         from .utils import analyze_text
@@ -154,6 +171,9 @@ def predict_news(request):
                 "groq_result": analysis.get("groq_result"),
                 "primary_model_status": analysis.get("primary_model_status"),
                 "primary_model_note": analysis.get("primary_model_note"),
+                "input_source": input_source,
+                "image_name": image_name,
+                "ocr_engine": ocr_engine,
             },
         )
 
@@ -179,6 +199,9 @@ def predict_news(request):
         "verification_results": analysis.get("verification_results", []),
         "gemini_result": analysis.get("gemini_result"),
         "groq_result": analysis.get("groq_result"),
+        "input_source": input_source,
+        "image_name": image_name,
+        "ocr_engine": ocr_engine,
     })
 
 
