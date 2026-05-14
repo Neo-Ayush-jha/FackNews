@@ -1,11 +1,15 @@
+import base64
+from io import BytesIO
 from pathlib import Path
 from html import unescape as html_unescape
 import json
 import os
 import re
-import threading
 import logging
 import random
+import subprocess
+import tempfile
+import threading
 from urllib.parse import quote_plus, unquote, urljoin, urlparse, urlunparse
 
 
@@ -192,6 +196,7 @@ SEARCH_SOURCE_ALIASES = {
 
 MODEL_PATH = (Path(__file__).resolve().parent / ".." / "bert_model").resolve()
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
 _tokenizer = None
 _model = None
 _torch = None
@@ -262,6 +267,78 @@ def _clean_html_fragment(value):
         return _clean_text(BeautifulSoup(text, "html.parser").get_text(" ", strip=True))
     except Exception:
         return _clean_text(text)
+
+
+def _clean_ocr_text(value):
+    lines = []
+    for raw_line in str(value or "").splitlines():
+        cleaned_line = _clean_text(raw_line)
+        if cleaned_line:
+            lines.append(cleaned_line)
+    return "\n".join(lines).strip()
+
+
+def _prepare_image_for_ocr(uploaded_file):
+    try:
+        from PIL import Image, ImageOps
+    except ImportError as exc:
+        raise ImportError("Missing Pillow dependency for image OCR.") from exc
+
+    if uploaded_file is None:
+        raise ValueError("No image file provided.")
+
+    image_name = Path(getattr(uploaded_file, "name", "") or "uploaded-image").name
+    image_ext = Path(image_name).suffix.lower()
+    if image_ext and image_ext not in SUPPORTED_IMAGE_EXTENSIONS:
+        raise ValueError("Unsupported image format. Please upload PNG, JPG, JPEG, WEBP, BMP, TIFF, or GIF.")
+
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+    image_bytes = uploaded_file.read()
+
+    if not image_bytes:
+        raise ValueError("Uploaded image is empty.")
+
+    max_image_bytes = _get_env_int("OCR_MAX_IMAGE_MB", 10) * 1024 * 1024
+    if len(image_bytes) > max_image_bytes:
+        raise ValueError("Image is too large. Please upload an image smaller than 10 MB.")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as source_image:
+            source_image.load()
+            image = ImageOps.exif_transpose(source_image)
+            if image.mode not in {"RGB", "RGBA", "L"}:
+                image = image.convert("RGB")
+            grayscale_image = ImageOps.grayscale(image)
+            ocr_ready_image = ImageOps.autocontrast(grayscale_image)
+            resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+
+            max_dimension = max(ocr_ready_image.size)
+            if 0 < max_dimension < 1600:
+                scale_ratio = 1600 / max_dimension
+                resized_width = max(1, int(ocr_ready_image.width * scale_ratio))
+                resized_height = max(1, int(ocr_ready_image.height * scale_ratio))
+                ocr_ready_image = ocr_ready_image.resize((resized_width, resized_height), resample=resampling)
+
+            prepared_buffer = BytesIO()
+            ocr_ready_image.save(prepared_buffer, format="PNG")
+    except Exception as exc:
+        raise ValueError("Could not read the uploaded image. Please try another file.") from exc
+
+    prepared_bytes = prepared_buffer.getvalue()
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    try:
+        temp_file.write(prepared_bytes)
+        temp_file.flush()
+    finally:
+        temp_file.close()
+
+    return {
+        "bytes": prepared_bytes,
+        "path": temp_file.name,
+        "mime_type": "image/png",
+        "image_name": image_name,
+    }
 
 
 def _looks_like_blocked_html(html):
@@ -937,6 +1014,19 @@ def _apply_fake_confidence_caps(primary_result, verification_result, merged_resu
         merged_result["confidence"] = _scale_real_confidence(merged_result.get("confidence"))
 
 
+def _apply_groq_display_boost(verification_result, merged_result):
+    groq_result = verification_result.get("groq_result") or {}
+    if groq_result.get("status") != "verified":
+        return
+    if groq_result.get("label") != merged_result.get("prediction"):
+        return
+
+    boosted_confidence = _clip_confidence(
+        _clip_confidence(groq_result.get("confidence"), fallback=merged_result.get("confidence", 50.0)) + 2.0
+    )
+    merged_result["confidence"] = boosted_confidence
+
+
 def _get_env_value(*keys):
     for key in keys:
         value = os.getenv(key)
@@ -961,6 +1051,241 @@ def _get_env_int(key, default):
         return parsed if parsed > 0 else default
     except (TypeError, ValueError):
         return default
+
+
+def _extract_text_with_pytesseract(image_bytes):
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("pytesseract is not installed.") from exc
+
+    with Image.open(BytesIO(image_bytes)) as image:
+        extracted_text = pytesseract.image_to_string(image)
+
+    return _clean_ocr_text(extracted_text)
+
+
+def _extract_text_with_windows_ocr(image_path, language_tag=""):
+    if os.name != "nt":
+        raise RuntimeError("Windows OCR is only available on Windows.")
+
+    escaped_path = str(image_path).replace("'", "''")
+    escaped_language = str(language_tag or "").replace("'", "''")
+    script = rf"""
+$ErrorActionPreference='Stop';
+Add-Type -AssemblyName System.Runtime.WindowsRuntime;
+[void][Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime];
+[void][Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType=WindowsRuntime];
+[void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime];
+[void][Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime];
+[void][Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType=WindowsRuntime];
+[void][Windows.Media.Ocr.OcrResult, Windows.Media.Ocr, ContentType=WindowsRuntime];
+[void][Windows.Globalization.Language, Windows.Globalization, ContentType=WindowsRuntime];
+$method = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }} | Select-Object -First 1);
+function Await($Operation, [Type]$ResultType) {{
+    $task = $method.MakeGenericMethod($ResultType).Invoke($null, @($Operation));
+    $task.Wait();
+    $task.Result
+}}
+$path = '{escaped_path}';
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile]);
+$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream]);
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder]);
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap]);
+$engine = $null;
+$languageUsed = '';
+if ('{escaped_language}') {{
+    try {{
+        $requestedLanguage = [Windows.Globalization.Language]::new('{escaped_language}');
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($requestedLanguage);
+        if ($null -ne $engine) {{
+            $languageUsed = $requestedLanguage.LanguageTag;
+        }}
+    }} catch {{
+        $engine = $null;
+    }}
+}}
+if ($null -eq $engine) {{
+    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages();
+    if ($null -ne $engine) {{
+        $languageUsed = 'user-profile';
+    }}
+}}
+if ($null -eq $engine) {{
+    $fallbackLanguage = [Windows.Globalization.Language]::new('en');
+    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($fallbackLanguage);
+    if ($null -ne $engine) {{
+        $languageUsed = $fallbackLanguage.LanguageTag;
+    }}
+}}
+if ($null -eq $engine) {{
+    throw 'Windows OCR language pack is not available.';
+}}
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult]);
+$text = '';
+if ($null -ne $result -and $null -ne $result.Text) {{
+    $text = [string]$result.Text;
+}}
+@{{
+    text = $text;
+    engine = 'Windows.Media.Ocr';
+    language = $languageUsed;
+}} | ConvertTo-Json -Compress
+"""
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=_get_env_int("WINDOWS_OCR_TIMEOUT", 20),
+        check=False,
+    )
+
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        error_message = stderr or stdout or "Windows OCR failed."
+        raise RuntimeError(error_message)
+
+    raw_output = (completed.stdout or "").strip()
+    if not raw_output:
+        return {"text": "", "engine": "Windows.Media.Ocr", "language": language_tag or ""}
+
+    try:
+        payload = json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Windows OCR returned an invalid response.") from exc
+
+    return {
+        "text": _clean_ocr_text(payload.get("text", "")),
+        "engine": payload.get("engine") or "Windows.Media.Ocr",
+        "language": payload.get("language") or language_tag or "",
+    }
+
+
+def _extract_text_with_gemini_image_ocr(image_bytes, mime_type="image/png"):
+    api_key = _get_env_value("GEMINI_API_KEY", "gemini_api_key")
+    if not api_key:
+        raise RuntimeError("Gemini API key not configured.")
+
+    model_name = _get_env_value("GEMINI_VISION_MODEL", "GEMINI_MODEL") or "gemini-2.5-flash"
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    prompt = (
+        "Extract all readable news or article text from this image. "
+        "Return only the extracted text in reading order. "
+        "Do not explain anything. If there is no readable text, return an empty string."
+    )
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type,
+                            "data": base64.b64encode(image_bytes).decode("ascii"),
+                        }
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0,
+            "maxOutputTokens": 2048,
+        },
+    }
+
+    requests = _get_requests()
+    response = requests.post(
+        endpoint,
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
+        json=payload,
+        timeout=_get_env_int("IMAGE_OCR_TIMEOUT", 12),
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    candidate = (data.get("candidates") or [{}])[0]
+    parts = ((candidate.get("content") or {}).get("parts")) or []
+    extracted_text = "".join(part.get("text", "") for part in parts)
+    return {
+        "text": _clean_ocr_text(extracted_text),
+        "engine": f"Gemini OCR ({model_name})",
+        "language": "",
+    }
+
+
+def extract_text_from_image(uploaded_file):
+    prepared_image = _prepare_image_for_ocr(uploaded_file)
+    preferred_language = _get_env_value("OCR_LANGUAGE_TAG")
+    best_result = {"text": "", "engine": "", "language": ""}
+    attempts = []
+
+    try:
+        try:
+            extracted_text = _extract_text_with_pytesseract(prepared_image["bytes"])
+            if extracted_text:
+                return {
+                    "text": extracted_text,
+                    "engine": "pytesseract",
+                    "language": preferred_language,
+                    "image_name": prepared_image["image_name"],
+                }
+        except Exception as exc:
+            attempts.append(f"pytesseract: {exc}")
+
+        try:
+            windows_result = _extract_text_with_windows_ocr(prepared_image["path"], preferred_language)
+            if windows_result.get("text"):
+                return {
+                    **windows_result,
+                    "image_name": prepared_image["image_name"],
+                }
+            best_result = windows_result
+        except Exception as exc:
+            attempts.append(f"windows_ocr: {exc}")
+
+        try:
+            gemini_result = _extract_text_with_gemini_image_ocr(
+                prepared_image["bytes"],
+                mime_type=prepared_image["mime_type"],
+            )
+            if gemini_result.get("text"):
+                return {
+                    **gemini_result,
+                    "image_name": prepared_image["image_name"],
+                }
+            if len(gemini_result.get("text", "")) > len(best_result.get("text", "")):
+                best_result = gemini_result
+        except Exception as exc:
+            attempts.append(f"gemini_ocr: {exc}")
+
+        if best_result.get("text"):
+            return {
+                **best_result,
+                "image_name": prepared_image["image_name"],
+            }
+
+        logger.warning("Image OCR failed for %s. Attempts: %s", prepared_image["image_name"], " | ".join(attempts))
+        raise ValueError(
+            "No readable text was found in the image. Try a clearer screenshot, crop the text area, or upload a higher-resolution image."
+        )
+    finally:
+        try:
+            os.unlink(prepared_image["path"])
+        except OSError:
+            pass
 
 
 def _llm_verification_enabled():
@@ -1250,41 +1575,20 @@ def _merge_predictions(primary_result, verification_result):
 def _build_decision_reason(primary_result, verification_result, merged_result):
     final_label = merged_result["prediction"]
     final_conf = merged_result["confidence"]
-    fake_conf = primary_result["fake_confidence"]
-    real_conf = primary_result["real_confidence"]
     signal_score = primary_result.get("signal_score", 0)
 
-    parts = [
-        (
-            f"Final decision is {final_label} with {final_conf}% confidence, "
-            f"based on the primary result (Fake: {fake_conf}%, Real: {real_conf}%) "
-            "and available Gemini/Groq verification."
-        )
-    ]
+    parts = [f"Final decision is {final_label} with {final_conf}% confidence."]
 
     if signal_score >= 5:
         parts.append(
-            "The content contains strong fake-news style signals (sensational/viral/exaggerated patterns)."
+            "The content shows strong suspicious language patterns, including sensational or exaggerated wording."
         )
     elif signal_score >= 2:
-        parts.append("The content contains moderate suspicious language patterns.")
+        parts.append("The content shows moderate suspicious language patterns in its wording and tone.")
     else:
-        parts.append("The content does not show strong fake-news style language patterns.")
+        parts.append("The content does not show strong suspicious language patterns, but the model still found enough signals for this result.")
 
-    verified_results = verification_result.get("results") or []
-    if verified_results:
-        for result in verified_results:
-            parts.append(
-                f"{result.get('provider')} returned {result.get('label')} "
-                f"with {result.get('confidence')}% confidence."
-            )
-
-        for key in ("gemini_result", "groq_result"):
-            result = verification_result.get(key) or {}
-            if result.get("status") != "verified" and result.get("error"):
-                parts.append(f"{result.get('provider')} verification was unavailable.")
-    else:
-        parts.append("Gemini/Groq verification was unavailable, so the primary result was used.")
+    parts.append("This result is based on the article's wording, structure, and overall language pattern.")
 
     return " ".join(parts)
 
@@ -1410,6 +1714,7 @@ def analyze_text(text):
         )
         merged_result = _merge_predictions(primary_result, verification_result)
         _apply_fake_confidence_caps(primary_result, verification_result, merged_result)
+        _apply_groq_display_boost(verification_result, merged_result)
         decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
         return _format_analysis_response(primary_result, verification_result, merged_result, decision_reason)
 
@@ -1469,6 +1774,7 @@ def analyze_text(text):
     verification_result = _verify_with_llm(cleaned_text, primary_label, primary_confidence)
     merged_result = _merge_predictions(primary_result, verification_result)
     _apply_fake_confidence_caps(primary_result, verification_result, merged_result)
+    _apply_groq_display_boost(verification_result, merged_result)
     decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
 
     return _format_analysis_response(primary_result, verification_result, merged_result, decision_reason)

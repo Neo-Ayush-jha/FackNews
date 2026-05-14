@@ -11,7 +11,7 @@
             Spot misinformation fast with a model trained on real newsroom data.
           </h2>
           <p class="mt-4 text-slate-600">
-            Paste a story or drop a link. The model returns a prediction and confidence score, plus a history log.
+            Paste a story, drop a link, or upload a news image. The app can extract text from the image and run the same prediction flow.
           </p>
         </div>
 
@@ -39,6 +39,20 @@
               class="w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black"
               placeholder="https://example.com/news or paste a headline"
             />
+            <div class="flex items-center gap-3 text-xs text-slate-400">
+              <span>OR</span>
+              <div class="h-px flex-1 bg-slate-200"></div>
+            </div>
+            <label class="text-sm font-medium text-slate-600" for="newsImage">Upload news image</label>
+            <div class="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-4">
+              <input
+                id="newsImage"
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp,image/bmp,image/tiff,image/gif"
+                class="w-full text-sm text-slate-600 file:mr-4 file:rounded-full file:border-0 file:bg-black file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white"
+              />
+              <p id="imageMeta" class="mt-3 text-xs text-slate-500">PNG, JPG, WEBP, BMP, TIFF, or GIF. Image select karoge to uska text OCR se niklega.</p>
+            </div>
           </div>
           <div class="mt-6 flex flex-wrap items-center gap-4">
             <button
@@ -93,6 +107,8 @@
         const detectForm = document.getElementById("detectForm");
         const newsText = document.getElementById("newsText");
         const newsUrl = document.getElementById("newsUrl");
+        const newsImage = document.getElementById("newsImage");
+        const imageMeta = document.getElementById("imageMeta");
         const statusEl = document.getElementById("status");
         const errorEl = document.getElementById("error");
         const resultCard = document.getElementById("resultCard");
@@ -110,20 +126,54 @@
           return match ? match.split("=")[1] : "";
         };
 
+        const escapeHtml = (value) => String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+        const getInputSourceLabel = (source) => {
+          if (source === "image") {
+            return "Image OCR";
+          }
+          if (source === "url") {
+            return "Article URL";
+          }
+          return "Manual Text";
+        };
+
+        const setImageMeta = (file) => {
+          if (!file) {
+            imageMeta.textContent = "PNG, JPG, WEBP, BMP, TIFF, or GIF. Image select karoge to uska text OCR se niklega.";
+            return;
+          }
+          const sizeInMb = (file.size / (1024 * 1024)).toFixed(2);
+          imageMeta.textContent = `Selected: ${file.name} (${sizeInMb} MB). Submit karte hi OCR text extract hoga.`;
+        };
+
         const renderResult = (payload) => {
           if (!payload) {
             resultCard.innerHTML = '<p class="text-sm text-slate-500">Run a check to see the result.</p>';
             return;
           }
           const badgeColor = payload.prediction === "Real News" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
+          const sourceLabel = getInputSourceLabel(payload.input_source);
+          const imageNote = payload.input_source === "image" && payload.image_name
+            ? `<p class="mt-2 text-xs text-slate-500">Source image: ${escapeHtml(payload.image_name)}${payload.ocr_engine ? ` via ${escapeHtml(payload.ocr_engine)}` : ""}</p>`
+            : "";
           resultCard.innerHTML = `
             <div class="flex items-center justify-between">
               <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${badgeColor}">
-                ${payload.prediction}
+                ${escapeHtml(payload.prediction)}
               </span>
-              <span class="text-xs text-slate-500">${payload.confidence}% confidence</span>
+              <span class="text-xs text-slate-500">${escapeHtml(payload.confidence)}% confidence</span>
             </div>
-            <p class="mt-3 text-sm text-slate-600 line-clamp-3">${payload.text || ""}</p>
+            <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+              <span class="rounded-full bg-slate-100 px-3 py-1 font-medium">${sourceLabel}</span>
+            </div>
+            <p class="mt-3 text-sm text-slate-600 line-clamp-3">${escapeHtml(payload.text || "")}</p>
+            ${imageNote}
           `;
         };
 
@@ -153,13 +203,15 @@
             }
             historyEl.innerHTML = data.slice(0, 5).map((item) => {
               const badge = item.result === "Real News" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
+              const source = item?.verification_result?.input_source || "text";
               return `
                 <div class="rounded-2xl border border-slate-200 bg-white/70 p-3">
                   <div class="flex items-center justify-between">
-                    <span class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${badge}">${item.result}</span>
-                    <span class="text-[11px] text-slate-500">${item.confidence}%</span>
+                    <span class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${badge}">${escapeHtml(item.result)}</span>
+                    <span class="text-[11px] text-slate-500">${escapeHtml(item.confidence)}%</span>
                   </div>
-                  <p class="mt-2 text-xs text-slate-500 line-clamp-2">${item.text}</p>
+                  <div class="mt-2 text-[11px] text-slate-400">${getInputSourceLabel(source)}</div>
+                  <p class="mt-2 text-xs text-slate-500 line-clamp-2">${escapeHtml(item.text || "")}</p>
                 </div>
               `;
             }).join("");
@@ -173,29 +225,40 @@
           errorEl.textContent = "";
           const pastedText = newsText.value.trim();
           const rawUrlOrText = newsUrl.value.trim();
+          const selectedImage = newsImage.files?.[0] || null;
           const url = rawUrlOrText && looksLikeUrl(rawUrlOrText) ? rawUrlOrText : "";
           const text = rawUrlOrText && !url
             ? [pastedText, rawUrlOrText].filter(Boolean).join("\n\n")
             : pastedText;
-          if (!text && !url) {
-            errorEl.textContent = "Please add text or a URL.";
+          if (!text && !url && !selectedImage) {
+            errorEl.textContent = "Please add text, a URL, or an image.";
             return;
           }
-          setStatus("Analyzing...", "text-amber-600");
+          setStatus(selectedImage ? "Extracting image text..." : "Analyzing...", "text-amber-600");
           try {
+            const formData = new FormData();
+            formData.append("text", text);
+            formData.append("url", url);
+            if (selectedImage) {
+              formData.append("image", selectedImage);
+            }
+
             const response = await fetch("/api/predict/", {
               method: "POST",
               headers: {
-                "Content-Type": "application/json",
                 "X-CSRFToken": getCsrfCookie("csrftoken"),
               },
-              body: JSON.stringify({ text, url }),
+              body: formData,
             });
             const payload = await response.json();
             if (!response.ok) {
               throw new Error(payload.error || "Prediction failed");
             }
-            const latest = { ...payload, text: payload.text || text || url };
+            const latest = {
+              ...payload,
+              input_source: payload.input_source || (selectedImage ? "image" : (url ? "url" : "text")),
+              text: payload.text || text || url,
+            };
             renderResult(latest);
             saveLatest(latest);
             setStatus("Done", "text-emerald-600");
@@ -209,11 +272,14 @@
         clearBtn.addEventListener("click", () => {
           newsText.value = "";
           newsUrl.value = "";
+          newsImage.value = "";
           errorEl.textContent = "";
           setStatus("Ready", "text-slate-500");
+          setImageMeta(null);
         });
 
         refreshHistory.addEventListener("click", fetchHistory);
+        newsImage.addEventListener("change", () => setImageMeta(newsImage.files?.[0] || null));
 
         const cached = localStorage.getItem("latestPrediction");
         if (cached) {
@@ -224,6 +290,7 @@
           }
         }
 
+        setImageMeta(null);
         fetchHistory();
       })();
     </script>

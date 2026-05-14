@@ -111,14 +111,32 @@
           }
         };
 
+        const buildDecisionReason = (prediction, confidence, signalScore) => {
+          const parts = [`Final decision is ${prediction} with ${formatPercent(confidence)} confidence.`];
+          if (signalScore >= 5) {
+            parts.push("The content shows strong suspicious language patterns, including sensational or exaggerated wording.");
+          } else if (signalScore >= 2) {
+            parts.push("The content shows moderate suspicious language patterns in its wording and tone.");
+          } else {
+            parts.push("The content does not show strong suspicious language patterns, but the model still found enough signals for this result.");
+          }
+          parts.push("This result is based on the article's wording, structure, and overall language pattern.");
+          return parts.join(" ");
+        };
+
         const normalizePrediction = (item) => {
           const verification = item?.verification_result || {};
           const prediction = item.prediction || item.result || "Unknown";
-          const confidence = clamp(item.confidence, 0, 100);
+          const groqResult = item.groq_result || verification.groq_result || {};
+          const baseConfidence = clamp(item.confidence, 0, 100);
+          const confidence = groqResult?.status === "verified" && groqResult?.label === prediction
+            ? clamp(toNumber(groqResult.confidence, baseConfidence) + 2, 0, 100)
+            : baseConfidence;
           const primaryPrediction = item.primary_prediction || verification.primary_prediction || prediction;
           const primaryConfidence = clamp(item.primary_confidence ?? verification.primary_confidence, 0, 100);
           const fallbackFakeConfidence = primaryPrediction === "Fake News" ? primaryConfidence : 100 - primaryConfidence;
           const fallbackRealConfidence = primaryPrediction === "Real News" ? primaryConfidence : 100 - primaryConfidence;
+          const signalScore = toNumber(item.signal_score ?? verification.signal_score, -1);
 
           return {
             id: item.id || null,
@@ -126,14 +144,17 @@
             confidence,
             text: item.text || "",
             created_at: item.created_at || new Date().toISOString(),
-            decision_reason: item.decision_reason || verification.decision_reason || "The detector reviewed the article wording, phrasing style, and confidence signals to generate the final result.",
-            signal_score: toNumber(item.signal_score ?? verification.signal_score, -1),
+            decision_reason: buildDecisionReason(prediction, confidence, signalScore),
+            signal_score: signalScore,
             primary_prediction: primaryPrediction,
             primary_confidence: primaryConfidence,
             primary_fake_confidence: clamp(item.primary_fake_confidence ?? verification.primary_fake_confidence, 0, 100) || clamp(fallbackFakeConfidence, 0, 100),
             primary_real_confidence: clamp(item.primary_real_confidence ?? verification.primary_real_confidence, 0, 100) || clamp(fallbackRealConfidence, 0, 100),
             primary_model_status: item.primary_model_status || verification.primary_model_status || "ready",
             primary_model_note: item.primary_model_note || verification.primary_model_note || "",
+            input_source: item.input_source || verification.input_source || "text",
+            image_name: item.image_name || verification.image_name || "",
+            ocr_engine: item.ocr_engine || verification.ocr_engine || "",
           };
         };
 
@@ -160,7 +181,20 @@
           return "Analysis complete";
         };
 
+        const getInputSourceLabel = (source) => {
+          if (source === "image") {
+            return "Image OCR";
+          }
+          if (source === "url") {
+            return "Article URL";
+          }
+          return "Manual Text";
+        };
+
         const getResultSummary = (data) => {
+          if (data.input_source === "image") {
+            return "Text was extracted from the uploaded image first, then the detector evaluated that extracted content.";
+          }
           if (data.prediction === "Real News") {
             return "Our detector found reporting patterns that align with credible news writing.";
           }
@@ -231,6 +265,7 @@
                 <p class="mt-3 text-sm font-semibold text-slate-800">${title}</p>
                 <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                   <span>${DISPLAY_MODEL_NAME}</span>
+                  <span>${escapeHtml(getInputSourceLabel(row.input_source))}</span>
                   <span>${formatPercent(row.confidence)} confidence</span>
                 </div>
               </button>
@@ -257,6 +292,9 @@
           const safePreview = escapeHtml((data.text || "").slice(0, 320)).replace(/\n/g, "<br>");
           const safeReason = escapeHtml(data.decision_reason || "No decision reason available.");
           const safeModelNote = escapeHtml(data.primary_model_note || "");
+          const safeSourceLabel = escapeHtml(getInputSourceLabel(data.input_source));
+          const safeImageName = escapeHtml(data.image_name || "");
+          const safeOcrEngine = escapeHtml(data.ocr_engine || "");
           const wordCount = countWords(data.text);
           const sentenceCount = countSentences(data.text);
           const characterCount = (data.text || "").length;
@@ -287,28 +325,32 @@
                     <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${getPredictionTone(data.prediction)}">
                       ${escapeHtml(data.prediction)}
                     </span>
+                    <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                      ${safeSourceLabel}
+                    </span>
                     <span class="text-sm text-slate-600">${getConfidenceMessage(data.confidence)}</span>
                   </div>
                   <p class="mt-3 text-sm text-slate-600">${getResultSummary(data)}</p>
+                  ${data.input_source === "image" && safeImageName ? `<p class="mt-3 text-xs text-slate-500">Image file: ${safeImageName}${safeOcrEngine ? ` via ${safeOcrEngine}` : ""}</p>` : ""}
                 </div>
 
-                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <div class="rounded-xl border border-slate-200 bg-white p-4 md:col-span-2">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Why This Result</p>
                   <p class="mt-3 text-sm leading-7 text-slate-600">${safeReason}</p>
                   ${safeModelNote ? `<p class="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-700">${safeModelNote}</p>` : ""}
                 </div>
 
-                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                {% comment %} <div class="rounded-xl border border-slate-200 bg-white p-4">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Confidence Breakdown</p>
                   <div class="mt-3 space-y-4">
                     ${renderScoreBar("Real News likelihood", data.primary_real_confidence, "#10b981")}
                     ${renderScoreBar("Fake News likelihood", data.primary_fake_confidence, "#ef4444")}
                     ${renderScoreBar("Final decision confidence", data.confidence, "#111827")}
                   </div>
-                </div>
+                </div> {% endcomment %}
 
                 <div class="rounded-xl border border-slate-200 bg-white p-4 md:col-span-2">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analyzed Article Preview</p>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Analyzed Content Preview</p>
                   <h3 class="mt-2 font-semibold text-slate-800">${safeTitle}</h3>
                   <p class="mt-2 text-sm text-slate-600 whitespace-pre-line">${safePreview}</p>
                 </div>
@@ -340,6 +382,8 @@
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Model Output</p>
                   <div class="mt-2 grid grid-cols-2 gap-2 text-sm text-slate-700">
                     <div>Model Name:</div><div>${DISPLAY_MODEL_NAME}</div>
+                    <div>Input Source:</div><div>${safeSourceLabel}</div>
+                    <div>OCR Engine:</div><div>${safeOcrEngine || "N/A"}</div>
                     <div>Final Prediction:</div><div>${escapeHtml(data.prediction)}</div>
                     <div>Primary Detector Output:</div><div>${escapeHtml(data.primary_prediction)}</div>
                     <div>Primary Confidence:</div><div>${formatPercent(data.primary_confidence)}</div>
