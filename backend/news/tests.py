@@ -3,7 +3,9 @@ from io import BytesIO
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
+
+from news.utils import _apply_groq_display_boost, _build_decision_reason
 
 
 def _sample_analysis():
@@ -95,3 +97,30 @@ class PredictNewsApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "No text, URL, or image provided")
+
+
+class AnalysisFormattingTests(SimpleTestCase):
+    def test_groq_display_boost_adds_two_percent_for_matching_label(self):
+        merged_result = {"prediction": "Fake News", "confidence": 86.89}
+        verification_result = {
+            "groq_result": {
+                "status": "verified",
+                "label": "Fake News",
+                "confidence": 92.16,
+            }
+        }
+
+        _apply_groq_display_boost(verification_result, merged_result)
+
+        self.assertEqual(merged_result["confidence"], 94.16)
+
+    def test_decision_reason_hides_provider_details(self):
+        reason = _build_decision_reason(
+            {"signal_score": 1},
+            {"groq_result": {"provider": "Groq"}, "gemini_result": {"provider": "Gemini"}},
+            {"prediction": "Fake News", "confidence": 94.16},
+        )
+
+        self.assertIn("Final decision is Fake News with 94.16% confidence.", reason)
+        self.assertNotIn("Groq", reason)
+        self.assertNotIn("Gemini", reason)

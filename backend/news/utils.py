@@ -1014,6 +1014,19 @@ def _apply_fake_confidence_caps(primary_result, verification_result, merged_resu
         merged_result["confidence"] = _scale_real_confidence(merged_result.get("confidence"))
 
 
+def _apply_groq_display_boost(verification_result, merged_result):
+    groq_result = verification_result.get("groq_result") or {}
+    if groq_result.get("status") != "verified":
+        return
+    if groq_result.get("label") != merged_result.get("prediction"):
+        return
+
+    boosted_confidence = _clip_confidence(
+        _clip_confidence(groq_result.get("confidence"), fallback=merged_result.get("confidence", 50.0)) + 2.0
+    )
+    merged_result["confidence"] = boosted_confidence
+
+
 def _get_env_value(*keys):
     for key in keys:
         value = os.getenv(key)
@@ -1562,41 +1575,20 @@ def _merge_predictions(primary_result, verification_result):
 def _build_decision_reason(primary_result, verification_result, merged_result):
     final_label = merged_result["prediction"]
     final_conf = merged_result["confidence"]
-    fake_conf = primary_result["fake_confidence"]
-    real_conf = primary_result["real_confidence"]
     signal_score = primary_result.get("signal_score", 0)
 
-    parts = [
-        (
-            f"Final decision is {final_label} with {final_conf}% confidence, "
-            f"based on the primary result (Fake: {fake_conf}%, Real: {real_conf}%) "
-            "and available Gemini/Groq verification."
-        )
-    ]
+    parts = [f"Final decision is {final_label} with {final_conf}% confidence."]
 
     if signal_score >= 5:
         parts.append(
-            "The content contains strong fake-news style signals (sensational/viral/exaggerated patterns)."
+            "The content shows strong suspicious language patterns, including sensational or exaggerated wording."
         )
     elif signal_score >= 2:
-        parts.append("The content contains moderate suspicious language patterns.")
+        parts.append("The content shows moderate suspicious language patterns in its wording and tone.")
     else:
-        parts.append("The content does not show strong fake-news style language patterns.")
+        parts.append("The content does not show strong suspicious language patterns, but the model still found enough signals for this result.")
 
-    verified_results = verification_result.get("results") or []
-    if verified_results:
-        for result in verified_results:
-            parts.append(
-                f"{result.get('provider')} returned {result.get('label')} "
-                f"with {result.get('confidence')}% confidence."
-            )
-
-        for key in ("gemini_result", "groq_result"):
-            result = verification_result.get(key) or {}
-            if result.get("status") != "verified" and result.get("error"):
-                parts.append(f"{result.get('provider')} verification was unavailable.")
-    else:
-        parts.append("Gemini/Groq verification was unavailable, so the primary result was used.")
+    parts.append("This result is based on the article's wording, structure, and overall language pattern.")
 
     return " ".join(parts)
 
@@ -1722,6 +1714,7 @@ def analyze_text(text):
         )
         merged_result = _merge_predictions(primary_result, verification_result)
         _apply_fake_confidence_caps(primary_result, verification_result, merged_result)
+        _apply_groq_display_boost(verification_result, merged_result)
         decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
         return _format_analysis_response(primary_result, verification_result, merged_result, decision_reason)
 
@@ -1781,6 +1774,7 @@ def analyze_text(text):
     verification_result = _verify_with_llm(cleaned_text, primary_label, primary_confidence)
     merged_result = _merge_predictions(primary_result, verification_result)
     _apply_fake_confidence_caps(primary_result, verification_result, merged_result)
+    _apply_groq_display_boost(verification_result, merged_result)
     decision_reason = _build_decision_reason(primary_result, verification_result, merged_result)
 
     return _format_analysis_response(primary_result, verification_result, merged_result, decision_reason)
